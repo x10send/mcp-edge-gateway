@@ -24,6 +24,13 @@ https://mcp.example.com/unraid/mcp -> http://unraid-agent.local:8043/mcp
 OAuth is not included in this first release. Add it before exposing sensitive
 backends to untrusted clients.
 
+The next milestone adds ChatGPT-compatible OAuth and an optional configuration
+web page on a separate LAN-only administration listener. The administration
+listener must not be forwarded through Cloudflare Tunnel. See
+[`ProjectSpec.md`](./ProjectSpec.md) for the planned security boundaries.
+OAuth tokens, passwords, and client secrets will be stored separately from
+`gateway.yaml`; public examples will never include deployment credentials.
+
 ## Configuration
 
 The container reads `/config/gateway.yaml`. Start with
