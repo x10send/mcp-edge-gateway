@@ -14,7 +14,7 @@ Use `GATEWAY_CONFIG=./gateway.yaml npm run dev` to start a local gateway.
 
 Run `npm run check` before opening a pull request. It verifies formatting,
 linting, type safety, tests, and the production build. CI runs the same command
-for every pull request and push to `main`.
+for every pull request and push to `main`. CI also builds the Docker image.
 
 Changes to proxy behavior must add or update tests. At minimum, preserve
 coverage for health reporting, MCP session headers, query strings, SSE relay,
@@ -27,3 +27,9 @@ Do not commit real hostnames, IP addresses, tunnel IDs, tokens, credentials, or
 machine-specific paths. Put local backend addresses in `gateway.yaml`, which is
 ignored by git. Put Docker Compose mount overrides in `.env`, which is also
 ignored. Keep public examples generic.
+
+## Releases
+
+Push a semantic version tag such as `v0.1.0` only after CI passes on `main`.
+GitHub Actions publishes versioned and `latest` images to
+`ghcr.io/x10send/mcp-edge-gateway`.

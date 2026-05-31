@@ -78,6 +78,8 @@ Every pull request must pass `npm run check`, which runs:
 4. Automated tests.
 5. A production TypeScript build.
 
+CI also builds the Docker image for pushes to `main` and pull requests.
+
 Proxy behavior changes require tests. Security-sensitive changes require a
 regression test. The checked-in suite covers configuration validation, default
 tool denial, allowlist and denylist precedence, health reporting, MCP session
@@ -93,13 +95,17 @@ at `/config/gateway.yaml`. On Unraid, `.env` may point
 Cloudflare Tunnel maps a public hostname such as `mcp.example.com` to the
 gateway HTTP service. MCP routes must not be cached.
 
+Semantic version tags such as `v0.1.0` publish Docker images to GitHub
+Container Registry at `ghcr.io/x10send/mcp-edge-gateway`. Releases publish full,
+minor, major, and `latest` tags.
+
 ## Roadmap
 
 ### Phase 1: Minimal Gateway
 
 - Complete the initial delivery described above.
 - Validate against the Unraid Management Agent.
-- Add container build verification in an environment with Docker.
+- Validate container builds through GitHub Actions.
 
 ### Phase 2: Backend Expansion
 
@@ -120,4 +126,4 @@ gateway HTTP service. MCP routes must not be cached.
 - Add request timeouts, body-size limits, and configurable upstream retry
   behavior where MCP semantics permit it.
 - Add metrics and structured audit events for denied calls.
-- Add container image scanning and release automation.
+- Add container image scanning.

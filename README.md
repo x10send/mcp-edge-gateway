@@ -113,6 +113,30 @@ After changing the YAML file, restart the container:
 docker compose restart mcp-edge-gateway
 ```
 
+## Container Releases
+
+Version tags publish container images to GitHub Container Registry:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The release workflow publishes:
+
+```text
+ghcr.io/x10send/mcp-edge-gateway:0.1.0
+ghcr.io/x10send/mcp-edge-gateway:0.1
+ghcr.io/x10send/mcp-edge-gateway:0
+ghcr.io/x10send/mcp-edge-gateway:latest
+```
+
+Pull the latest release on Unraid with:
+
+```bash
+docker pull ghcr.io/x10send/mcp-edge-gateway:latest
+```
+
 ## Cloudflare Tunnel
 
 In the Cloudflare Zero Trust dashboard, add a public hostname to the tunnel:
