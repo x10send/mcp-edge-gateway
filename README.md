@@ -24,6 +24,10 @@ https://mcp.example.com/unraid/mcp -> http://unraid-agent.local:8043/mcp
 OAuth is not included in this first release. Add it before exposing sensitive
 backends to untrusted clients.
 
+> **Security warning:** `v0.1.0` is a LAN-only development baseline. Do not
+> expose MCP routes through Cloudflare Tunnel until the OAuth and security
+> gates in [`ProjectSpec.md`](./ProjectSpec.md) are complete.
+
 The next milestone adds ChatGPT-compatible OAuth and an optional configuration
 web page on a separate LAN-only administration listener. The administration
 listener must not be forwarded through Cloudflare Tunnel. See
@@ -151,6 +155,10 @@ docker pull ghcr.io/x10send/mcp-edge-gateway:latest
 ```
 
 ## Cloudflare Tunnel
+
+The following is a future deployment step. Do not enable it for `v0.1.0`.
+Complete [`docs/SECURE_DEPLOYMENT_CHECKLIST.md`](./docs/SECURE_DEPLOYMENT_CHECKLIST.md)
+before external exposure.
 
 In the Cloudflare Zero Trust dashboard, add a public hostname to the tunnel:
 
