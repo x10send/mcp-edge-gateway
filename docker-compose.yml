@@ -1,0 +1,9 @@
+services:
+  mcp-edge-gateway:
+    build: .
+    container_name: mcp-edge-gateway
+    restart: unless-stopped
+    ports:
+      - "8788:8788"
+    volumes:
+      - ${GATEWAY_CONFIG_FILE:-./gateway.yaml}:/config/gateway.yaml:ro

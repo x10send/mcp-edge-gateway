@@ -1,0 +1,22 @@
+server:
+  host: 0.0.0.0
+  port: 8788
+  logLevel: info
+
+tools:
+  # Glob patterns are case-insensitive. Dangerous tool names are denied by
+  # default, including shell, exec, write, delete, restart, stop, start,
+  # reboot, shutdown, update, and install.
+  defaultDenyDangerousTools: true
+  allow: []
+  deny: []
+
+routes:
+  - path: /unraid/mcp
+    upstream: http://unraid-agent.local:8043/mcp
+
+  # Add routes as their local MCP servers become available:
+  # - path: /homeassistant/mcp
+  #   upstream: http://home-assistant.local:8123/mcp
+  # - path: /hubitat/mcp
+  #   upstream: http://hubitat.local/mcp
