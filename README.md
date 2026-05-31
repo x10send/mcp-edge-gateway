@@ -67,6 +67,12 @@ Run the full quality suite before submitting changes:
 npm run check
 ```
 
+Run tests with the enforced coverage report directly:
+
+```bash
+npm run test:coverage
+```
+
 See [`ProjectSpec.md`](./ProjectSpec.md) for the architecture and roadmap, and
 [`CONTRIBUTING.md`](./CONTRIBUTING.md) for testing and public-repository rules.
 

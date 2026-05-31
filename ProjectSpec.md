@@ -75,10 +75,15 @@ Every pull request must pass `npm run check`, which runs:
 1. Prettier formatting verification.
 2. ESLint static analysis.
 3. TypeScript typechecking.
-4. Automated tests.
+4. Automated tests with coverage thresholds.
 5. A production TypeScript build.
 
 CI also builds the Docker image for pushes to `main` and pull requests.
+
+Coverage must remain at or above 90% for lines, 75% for branches, and 90% for
+functions across `src/app.ts`, `src/config.ts`, and `src/tool-policy.ts`.
+`src/server.ts` is excluded because it only wires configuration, process
+signals, and socket startup around the tested application builder.
 
 Proxy behavior changes require tests. Security-sensitive changes require a
 regression test. The checked-in suite covers configuration validation, default

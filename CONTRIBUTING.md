@@ -16,6 +16,11 @@ Run `npm run check` before opening a pull request. It verifies formatting,
 linting, type safety, tests, and the production build. CI runs the same command
 for every pull request and push to `main`. CI also builds the Docker image.
 
+`npm run test:coverage` enforces at least 90% line coverage, 75% branch
+coverage, and 90% function coverage across the testable application modules.
+`src/server.ts` is a thin process bootstrap and is excluded from the coverage
+gate.
+
 Changes to proxy behavior must add or update tests. At minimum, preserve
 coverage for health reporting, MCP session headers, query strings, SSE relay,
 tool discovery filtering, and blocked tool calls. Security-sensitive changes
