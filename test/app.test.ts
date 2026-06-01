@@ -841,6 +841,72 @@ test("proxy returns 403 when token lacks scope for specific tool", async () => {
   cleanup();
 });
 
+test("proxy accepts lowercase 'bearer' scheme in Authorization header (RFC 7235 case-insensitive)", async () => {
+  const { db, cleanup } = makeDb();
+  const { plaintext } = issueToken(db, {});
+  const sendUpstream = (async () =>
+    upstreamResponse("{}", "application/json")) as SendUpstream;
+  const authConfig: GatewayConfig = {
+    ...config,
+    security: { ...config.security, requireAuth: true },
+  };
+  const app = buildApp(authConfig, { sendUpstream, db });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/unraid/mcp",
+    headers: { host: "localhost", authorization: `bearer ${plaintext}` },
+  });
+
+  assert.equal(
+    response.statusCode,
+    200,
+    "lowercase bearer scheme should be accepted",
+  );
+  await app.close();
+  cleanup();
+});
+
+test("tool-scope check with prototype-key tool name does not crash (DoS regression)", async () => {
+  const { db, cleanup } = makeDb();
+  const { plaintext } = issueToken(db, { scope: "read" });
+  const sendUpstream = (async () =>
+    upstreamResponse("{}", "application/json")) as SendUpstream;
+  const authConfig: GatewayConfig = {
+    ...config,
+    security: { ...config.security, requireAuth: true },
+    routes: [
+      {
+        path: "/unraid",
+        upstream: "http://unraid-agent.local:8043",
+        tools: { toolScopes: { safe_tool: ["read"] } },
+      },
+    ],
+  };
+  const app = buildApp(authConfig, { sendUpstream, db });
+
+  // Sending __proto__ as tool name must not cause a 500
+  const response = await app.inject({
+    method: "POST",
+    url: "/unraid/mcp",
+    headers: { host: "localhost", authorization: `Bearer ${plaintext}` },
+    payload: {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "__proto__" },
+    },
+  });
+
+  assert.notEqual(
+    response.statusCode,
+    500,
+    "__proto__ tool name must not cause a server error",
+  );
+  await app.close();
+  cleanup();
+});
+
 test("proxy returns 401 when token is scoped to a different route", async () => {
   const { db, cleanup } = makeDb();
   const { plaintext } = issueToken(db, { routes: ["/other-route"] });

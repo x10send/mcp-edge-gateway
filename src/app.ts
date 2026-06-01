@@ -276,7 +276,8 @@ function createProxyHandler(
       const host = request.headers.host ?? request.hostname;
       const metadataUrl = `${request.protocol}://${host}${routePath}/.well-known/oauth-protected-resource`;
       const authHeader = request.headers.authorization;
-      if (!authHeader?.startsWith("Bearer ")) {
+      // RFC 7235 §2.1: auth-scheme is case-insensitive
+      if (!authHeader || !/^bearer /i.test(authHeader)) {
         reply.header(
           "WWW-Authenticate",
           `Bearer realm="MCP Gateway", resource_metadata="${metadataUrl}"`,
@@ -285,7 +286,7 @@ function createProxyHandler(
       }
       const tokenResult = lookupToken(
         routeAuth.db,
-        authHeader.slice(7),
+        authHeader.slice(authHeader.indexOf(" ") + 1),
         routePath,
       );
       if (!tokenResult) {
@@ -333,7 +334,11 @@ function createProxyHandler(
     ) {
       const toolName = extractToolCallName(jsonBody);
       if (toolName) {
-        const required = routeAuth.toolScopes[toolName] ?? [];
+        // Object.hasOwn prevents prototype-inherited keys (__proto__, constructor, etc.)
+        // from resolving to non-array values and crashing the .every() call in hasScope.
+        const required = Object.hasOwn(routeAuth.toolScopes, toolName)
+          ? routeAuth.toolScopes[toolName]!
+          : [];
         if (!hasScope(tokenScope, required)) {
           reply.header(
             "WWW-Authenticate",
