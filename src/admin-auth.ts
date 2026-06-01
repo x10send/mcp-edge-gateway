@@ -114,12 +114,16 @@ export function isLoginRateLimited(
   const windowStart = Math.floor(Date.now() / 1000) - 3600;
   const row = db
     .prepare(
-      `SELECT count(*) as n FROM login_attempts
+      `SELECT count(*) as n, max(created_at) as latest FROM login_attempts
        WHERE ip_address = ? AND succeeded = 0 AND created_at >= ?`,
     )
-    .get(ip, windowStart) as { n: number };
+    .get(ip, windowStart) as { n: number; latest: number | null };
 
-  return row.n >= config.maxLoginAttemptsPerHour;
+  return (
+    row.n >= config.maxLoginAttemptsPerHour &&
+    row.latest !== null &&
+    row.latest + config.loginLockoutSeconds > Math.floor(Date.now() / 1000)
+  );
 }
 
 export function pruneLoginAttempts(db: DatabaseSync): void {

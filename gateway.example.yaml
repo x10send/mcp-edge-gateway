@@ -10,6 +10,9 @@ admin:
   enabled: false
   port: 8789
   host: 127.0.0.1
+  # Secure cookies require a LAN-only HTTPS reverse proxy. For isolated direct
+  # HTTP LAN setup only, explicitly set insecureAllowHttpCookies: true.
+  insecureAllowHttpCookies: false
   sessionTtlSeconds: 28800
   maxLoginAttemptsPerHour: 10
   loginLockoutSeconds: 900
@@ -21,6 +24,10 @@ diagnostics:
   tokenEnv: GATEWAY_DIAGNOSTICS_TOKEN
 
 security:
+  # Canonical externally visible origin. Use an explicit https:// origin before
+  # external exposure. OAuth metadata never derives this value from Host headers.
+  publicOrigin: http://localhost:8788
+  insecureAllowHttpPublicOrigin: true
   # Add the LAN address or public MCP hostname used to reach this gateway.
   allowedHosts:
     - localhost
@@ -28,6 +35,10 @@ security:
   # Leave empty unless requests arrive through a reviewed reverse proxy.
   trustedProxies: []
   allowPrivateUpstreamsOnly: true
+  # LAN-only development baseline. Remove insecure overrides and set
+  # requireAuth: true before external exposure.
+  requireAuth: false
+  insecureAllowUnauthenticatedMcp: true
   bodyLimitBytes: 1048576
   jsonResponseLimitBytes: 4194304
   maxConcurrentRequests: 100

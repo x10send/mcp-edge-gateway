@@ -34,15 +34,7 @@ if (config.admin.enabled) {
     config,
     configPath,
     onConfigSaved: () => {
-      try {
-        configService.reload();
-        app.log.info("configuration reloaded");
-      } catch (error) {
-        app.log.error(
-          { error },
-          "configuration reload failed — restart required",
-        );
-      }
+      app.log.info("configuration saved; restart required to apply changes");
     },
   });
 
@@ -52,7 +44,9 @@ if (config.admin.enabled) {
     console.log("ADMIN BOOTSTRAP CREDENTIAL (one-time use, shown once):");
     console.log(bootstrapResult.plaintext);
     console.log(
-      "Navigate to http://<host>:8789/admin/setup to complete setup.",
+      config.admin.insecureAllowHttpCookies
+        ? `Navigate to http://<host>:${config.admin.port}/admin/setup to complete setup.`
+        : "Open /admin/setup through the LAN-only HTTPS administration endpoint.",
     );
     console.log("==========================================================");
   }

@@ -11,6 +11,10 @@ import { issueToken } from "../src/oauth-token-store.js";
 import type { GatewayConfig } from "../src/config.js";
 
 const VALID_YAML = `
+security:
+  publicOrigin: http://localhost:8788
+  insecureAllowHttpPublicOrigin: true
+  insecureAllowUnauthenticatedMcp: true
 routes:
   - path: /unraid
     upstream: http://unraid-agent.local:8043
@@ -23,6 +27,7 @@ const BASE_CONFIG: GatewayConfig = {
     enabled: true,
     port: 8789,
     host: "127.0.0.1",
+    insecureAllowHttpCookies: false,
     sessionTtlSeconds: 3600,
     maxLoginAttemptsPerHour: 10,
     loginLockoutSeconds: 900,
@@ -31,7 +36,10 @@ const BASE_CONFIG: GatewayConfig = {
     allowedHosts: ["localhost", "127.0.0.1"],
     trustedProxies: [],
     allowPrivateUpstreamsOnly: true,
+    publicOrigin: "http://localhost:8788",
+    insecureAllowHttpPublicOrigin: true,
     requireAuth: false,
+    insecureAllowUnauthenticatedMcp: true,
     bodyLimitBytes: 1_048_576,
     jsonResponseLimitBytes: 4_194_304,
     maxConcurrentRequests: 100,
@@ -90,6 +98,7 @@ async function doSetup(
   });
   const setCookie = setupRes.headers["set-cookie"] as string;
   assert.ok(setCookie, "setup should set a session cookie");
+  assert.ok(setCookie.includes("Secure"), "session cookie must be secure");
   const cookie = setCookie.split(";")[0]!;
   // Read the CSRF token directly from the session store — it is no longer
   // exposed in the redirect URL (which would leak it into logs/history).
@@ -112,6 +121,25 @@ test("admin app sets security headers on every response", async () => {
     assert.equal(res.headers["referrer-policy"], "no-referrer");
     assert.ok(res.headers["content-security-policy"]);
     assert.ok((res.headers["cache-control"] as string).includes("no-store"));
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("admin HTTP cookie override is explicit and disables the Secure flag", async () => {
+  const ctx = setupTest({
+    ...BASE_CONFIG,
+    admin: { ...BASE_CONFIG.admin, insecureAllowHttpCookies: true },
+  });
+  try {
+    const { plaintext } = initBootstrap(ctx.db);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/setup",
+      payload: `token=${encodeURIComponent(plaintext!)}&password=correct-horse-battery-staple&confirm=correct-horse-battery-staple`,
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+    });
+    assert.ok(!(res.headers["set-cookie"] as string).includes("Secure"));
   } finally {
     await ctx.cleanup();
   }
@@ -334,6 +362,24 @@ test("POST /admin/logout clears the session and redirects", async () => {
   }
 });
 
+test("POST /admin/logout rejects requests with missing CSRF token", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie } = await doSetup(ctx);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/logout",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie,
+      },
+    });
+    assert.equal(res.statusCode, 403);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
 test("GET /admin/dashboard clears stale cookie when session does not exist", async () => {
   const ctx = setupTest();
   try {
@@ -472,7 +518,8 @@ test("POST /admin/config saves valid YAML and rotates the session", async () => 
         cookie: oldCookie,
       },
     });
-    assert.equal(res.statusCode, 302);
+    assert.equal(res.statusCode, 200);
+    assert.ok(res.body.includes("Restart required"));
     const newCookie = res.headers["set-cookie"] as string;
     assert.ok(newCookie, "session should be rotated on save");
     // Old cookie no longer works

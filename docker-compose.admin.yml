@@ -1,0 +1,6 @@
+services:
+  mcp-edge-gateway:
+    ports:
+      - "${GATEWAY_ADMIN_BIND_ADDRESS:-127.0.0.1}:8789:8789"
+    volumes:
+      - ${GATEWAY_CONFIG_DIR:-./config}:/config

@@ -93,9 +93,12 @@ and pre-dispatch rejection of denied tool calls.
 
 ## Deployment Model
 
-The Docker image listens on port `8788`. Docker Compose mounts a local YAML file
-at `/config/gateway.yaml`. On Unraid, `.env` may point
-`GATEWAY_CONFIG_FILE` at an appdata-managed YAML file.
+The Docker image listens on port `8788`. Docker Compose mounts an
+appdata-managed configuration directory at `/config`. The default manual-YAML
+profile mounts it read-only with a separate writable `/config/state` mount.
+When administration is enabled, the administration override mounts `/config`
+read-write so atomic YAML replacement and backups can work. On Unraid, `.env`
+may point `GATEWAY_CONFIG_DIR` at the appdata-managed directory.
 
 Cloudflare Tunnel maps a public hostname such as `mcp.example.com` to the
 gateway HTTP service. MCP routes must not be cached.
@@ -318,10 +321,12 @@ one-time setup credential and must not create a default password.
 ### Current Exposure Status
 
 The `v0.1.0` image is a development baseline and must not be exposed to
-untrusted clients. Phase 0 runtime and active CI hardening are implemented on
-`main`, but OAuth authentication and scope enforcement are not implemented yet.
-Automatic CodeQL and required branch protection remain deferred while the
-repository is private on a GitHub plan that does not enable those controls.
+untrusted clients. Phase 0 runtime and active CI hardening and Phases 1 through
+3 are implemented on `main`. Automatic CodeQL and required branch protection
+remain deferred while the repository is private on a GitHub plan that does not
+enable those controls. OAuth authorization-server endpoints, client
+registration, authorization codes, refresh tokens, and protocol integration
+testing remain incomplete.
 
 Do not configure Cloudflare Tunnel access to MCP routes until Phases 1 through
 5 are complete and a security-reviewed release is published.
@@ -473,9 +478,10 @@ Authentication and administration changes require regression coverage for:
 ## Roadmap
 
 Complete the implementation phases above in order. Phase 0 runtime and active
-CI controls are implemented on `main`; its GitHub-hosted CodeQL and branch
-protection tasks remain deferred while the repository is private on the current
-plan. Phases 1 through 5 remain required before external MCP exposure.
+CI controls and Phases 1 through 3 are implemented on `main`; GitHub-hosted
+CodeQL and branch protection tasks remain deferred while the repository is
+private on the current plan. Phases 4 and 5 remain required before external MCP
+exposure.
 
 CodeQL is checked in but manual while the repository remains private because
 GitHub requires Advanced Security for private-repository result uploads. Enable

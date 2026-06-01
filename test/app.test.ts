@@ -24,7 +24,10 @@ const config: GatewayConfig = {
     allowedHosts: ["localhost", "127.0.0.1"],
     trustedProxies: [],
     allowPrivateUpstreamsOnly: true,
+    publicOrigin: "http://localhost:8788",
+    insecureAllowHttpPublicOrigin: true,
     requireAuth: false,
+    insecureAllowUnauthenticatedMcp: true,
     bodyLimitBytes: 1_048_576,
     jsonResponseLimitBytes: 4_194_304,
     maxConcurrentRequests: 100,
@@ -655,23 +658,23 @@ test("root protected-resource metadata endpoint returns RFC 9728 document", asyn
     "application/json; charset=utf-8",
   );
   const body = response.json();
-  assert.equal(body.resource, "http://localhost");
+  assert.equal(body.resource, "http://localhost:8788");
   assert.deepEqual(body.bearer_methods_supported, ["header"]);
   await app.close();
 });
 
-test("per-route protected-resource metadata endpoint returns route-scoped document", async () => {
+test("path-specific protected-resource metadata endpoint returns the canonical MCP resource", async () => {
   const app = buildApp(config);
 
   const response = await app.inject({
     method: "GET",
-    url: "/unraid/.well-known/oauth-protected-resource",
+    url: "/.well-known/oauth-protected-resource/unraid/mcp",
     headers: { host: "localhost" },
   });
 
   assert.equal(response.statusCode, 200);
   const body = response.json();
-  assert.equal(body.resource, "http://localhost/unraid");
+  assert.equal(body.resource, "http://localhost:8788/unraid/mcp");
   assert.deepEqual(body.bearer_methods_supported, ["header"]);
   await app.close();
 });
@@ -698,6 +701,34 @@ test("buildApp throws at startup when requireAuth is true but no db provided", (
         security: { ...config.security, requireAuth: true },
       }),
     /database.*required/i,
+  );
+});
+
+test("buildApp rejects unauthenticated MCP without an explicit insecure override", () => {
+  assert.throws(
+    () =>
+      buildApp({
+        ...config,
+        security: {
+          ...config.security,
+          insecureAllowUnauthenticatedMcp: false,
+        },
+      }),
+    /insecureAllowUnauthenticatedMcp/,
+  );
+});
+
+test("buildApp rejects HTTP public origins without an explicit insecure override", () => {
+  assert.throws(
+    () =>
+      buildApp({
+        ...config,
+        security: {
+          ...config.security,
+          insecureAllowHttpPublicOrigin: false,
+        },
+      }),
+    /insecureAllowHttpPublicOrigin/,
   );
 });
 
@@ -754,6 +785,11 @@ test("proxy requires auth when security.requireAuth is true", async () => {
   assert.ok(
     (response.headers["www-authenticate"] as string).includes("Bearer realm"),
   );
+  assert.ok(
+    (response.headers["www-authenticate"] as string).includes(
+      'resource_metadata="http://localhost:8788/.well-known/oauth-protected-resource/unraid/mcp"',
+    ),
+  );
   await app.close();
   cleanup();
 });
@@ -779,6 +815,9 @@ test("proxy requires auth when route has requiredScopes", async () => {
   });
 
   assert.equal(response.statusCode, 401);
+  assert.ok(
+    (response.headers["www-authenticate"] as string).includes('scope="read"'),
+  );
   await app.close();
   cleanup();
 });

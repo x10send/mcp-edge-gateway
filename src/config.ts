@@ -21,7 +21,10 @@ export interface SecurityConfig {
   allowedHosts: string[];
   trustedProxies: string[];
   allowPrivateUpstreamsOnly: boolean;
+  publicOrigin: string;
+  insecureAllowHttpPublicOrigin: boolean;
   requireAuth: boolean;
+  insecureAllowUnauthenticatedMcp: boolean;
   bodyLimitBytes: number;
   jsonResponseLimitBytes: number;
   maxConcurrentRequests: number;
@@ -42,6 +45,7 @@ export interface AdminConfig {
   enabled: boolean;
   port: number;
   host: string;
+  insecureAllowHttpCookies: boolean;
   sessionTtlSeconds: number;
   maxLoginAttemptsPerHour: number;
   loginLockoutSeconds: number;
@@ -153,7 +157,7 @@ function parseRoutes(value: unknown, security: SecurityConfig): RouteConfig[] {
         route.tools === undefined
           ? undefined
           : parseToolPolicy(route.tools, `routes[${index}].tools`),
-      requiredScopes: readStringArray(
+      requiredScopes: readScopeArray(
         route.requiredScopes,
         `routes[${index}].requiredScopes`,
       ),
@@ -198,6 +202,11 @@ function parseAdmin(value: unknown): AdminConfig {
     enabled: readBoolean(admin.enabled, "admin.enabled", false) as boolean,
     port,
     host: readString(admin.host, "admin.host", "127.0.0.1"),
+    insecureAllowHttpCookies: readBoolean(
+      admin.insecureAllowHttpCookies,
+      "admin.insecureAllowHttpCookies",
+      false,
+    ) as boolean,
     sessionTtlSeconds: readPositiveInteger(
       admin.sessionTtlSeconds,
       "admin.sessionTtlSeconds",
@@ -232,6 +241,35 @@ function parseSecurity(value: unknown): SecurityConfig {
   }
   allowedHosts.forEach(validateAllowedHost);
 
+  const requireAuth = readBoolean(
+    security.requireAuth,
+    "security.requireAuth",
+    false,
+  ) as boolean;
+  const insecureAllowUnauthenticatedMcp = readBoolean(
+    security.insecureAllowUnauthenticatedMcp,
+    "security.insecureAllowUnauthenticatedMcp",
+    false,
+  ) as boolean;
+  if (!requireAuth && !insecureAllowUnauthenticatedMcp) {
+    throw new Error(
+      "security.requireAuth may be disabled only when security.insecureAllowUnauthenticatedMcp is explicitly true",
+    );
+  }
+  const publicOrigin = parsePublicOrigin(
+    readString(security.publicOrigin, "security.publicOrigin"),
+  );
+  const insecureAllowHttpPublicOrigin = readBoolean(
+    security.insecureAllowHttpPublicOrigin,
+    "security.insecureAllowHttpPublicOrigin",
+    false,
+  ) as boolean;
+  if (publicOrigin.startsWith("http:") && !insecureAllowHttpPublicOrigin) {
+    throw new Error(
+      "HTTP security.publicOrigin requires security.insecureAllowHttpPublicOrigin to be explicitly true",
+    );
+  }
+
   return {
     allowedHosts,
     trustedProxies: readStringArray(
@@ -244,11 +282,10 @@ function parseSecurity(value: unknown): SecurityConfig {
       "security.allowPrivateUpstreamsOnly",
       true,
     ) as boolean,
-    requireAuth: readBoolean(
-      security.requireAuth,
-      "security.requireAuth",
-      false,
-    ) as boolean,
+    publicOrigin,
+    insecureAllowHttpPublicOrigin,
+    requireAuth,
+    insecureAllowUnauthenticatedMcp,
     bodyLimitBytes: readPositiveInteger(
       security.bodyLimitBytes,
       "security.bodyLimitBytes",
@@ -297,6 +334,30 @@ function parseSecurity(value: unknown): SecurityConfig {
   };
 }
 
+function parsePublicOrigin(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(
+      "security.publicOrigin must be a valid HTTP or HTTPS origin",
+    );
+  }
+  if (
+    !["http:", "https:"].includes(url.protocol) ||
+    url.username ||
+    url.password ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error(
+      "security.publicOrigin must be a valid HTTP or HTTPS origin",
+    );
+  }
+  return url.origin;
+}
+
 function validateAllowedHost(hostname: string): void {
   const normalized = stripIpv6Brackets(hostname);
   if (
@@ -328,7 +389,7 @@ function parseToolPolicy(value: unknown, field: string): ToolPolicyConfig {
       value.defaultDenyDangerousTools,
       `${field}.defaultDenyDangerousTools`,
     ),
-    toolScopes: readStringRecord(value.toolScopes, `${field}.toolScopes`),
+    toolScopes: readScopeRecord(value.toolScopes, `${field}.toolScopes`),
   };
 }
 
@@ -401,7 +462,13 @@ function readPositiveInteger(
   return value as number;
 }
 
-function readStringRecord(
+function readScopeArray(value: unknown, field: string): string[] | undefined {
+  const scopes = readStringArray(value, field);
+  scopes?.forEach((scope) => validateScope(scope, field));
+  return scopes;
+}
+
+function readScopeRecord(
   value: unknown,
   field: string,
 ): Record<string, string[]> | undefined {
@@ -419,9 +486,16 @@ function readStringRecord(
     ) {
       throw new Error(`${field}.${key} must be an array of non-empty strings`);
     }
+    val.forEach((scope) => validateScope(scope as string, `${field}.${key}`));
     result[key] = val as string[];
   }
   return result;
+}
+
+function validateScope(scope: string, field: string): void {
+  if (!/^[\x21\x23-\x5b\x5d-\x7e]+$/.test(scope)) {
+    throw new Error(`${field} contains an invalid OAuth scope`);
+  }
 }
 
 function isIpAddress(hostname: string): boolean {

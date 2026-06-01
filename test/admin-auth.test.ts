@@ -28,6 +28,7 @@ const ADMIN_CONFIG: AdminConfig = {
   enabled: true,
   port: 8789,
   host: "127.0.0.1",
+  insecureAllowHttpCookies: false,
   sessionTtlSeconds: 3600,
   maxLoginAttemptsPerHour: 5,
   loginLockoutSeconds: 900,
@@ -193,6 +194,22 @@ test("isLoginRateLimited returns true at the threshold", () => {
       recordLoginAttempt(db, "10.0.0.1", false);
     }
     assert.equal(isLoginRateLimited(db, ADMIN_CONFIG, "10.0.0.1"), true);
+  } finally {
+    cleanup();
+  }
+});
+
+test("isLoginRateLimited allows another attempt after the lockout expires", () => {
+  const { db, cleanup } = openDb();
+  try {
+    const createdAt =
+      Math.floor(Date.now() / 1000) - ADMIN_CONFIG.loginLockoutSeconds - 1;
+    for (let i = 0; i < 5; i++) {
+      db.prepare(
+        "INSERT INTO login_attempts (ip_address, succeeded, created_at) VALUES (?, 0, ?)",
+      ).run("10.0.0.1", createdAt);
+    }
+    assert.equal(isLoginRateLimited(db, ADMIN_CONFIG, "10.0.0.1"), false);
   } finally {
     cleanup();
   }

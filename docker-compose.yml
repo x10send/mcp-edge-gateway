@@ -11,13 +11,10 @@ services:
       - ALL
     ports:
       - "8788:8788"
-      # Bind admin listener to LAN only — never expose through Cloudflare Tunnel.
-      # Uncomment when admin.enabled: true in gateway.yaml.
-      # - "127.0.0.1:8789:8789"
     tmpfs:
       - /tmp:size=16m,mode=1777
     volumes:
-      - ${GATEWAY_CONFIG_FILE:-./gateway.yaml}:/config/gateway.yaml
+      - ${GATEWAY_CONFIG_DIR:-./config}:/config:ro
       - ${GATEWAY_STATE_DIR:-./state}:/config/state
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8788/health"]

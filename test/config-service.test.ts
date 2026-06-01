@@ -6,6 +6,10 @@ import test from "node:test";
 import { ConfigService } from "../src/config-service.js";
 
 const VALID_CONFIG = `
+security:
+  publicOrigin: http://localhost:8788
+  insecureAllowHttpPublicOrigin: true
+  insecureAllowUnauthenticatedMcp: true
 routes:
   - path: /unraid
     upstream: http://unraid-agent.local:8043
@@ -14,6 +18,10 @@ routes:
 const VALID_CONFIG_ALT = `
 server:
   port: 9000
+security:
+  publicOrigin: http://localhost:9000
+  insecureAllowHttpPublicOrigin: true
+  insecureAllowUnauthenticatedMcp: true
 routes:
   - path: /homeassistant
     upstream: http://home-assistant.local:8123

@@ -83,13 +83,17 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
   function setSessionCookie(reply: FastifyReply, token: string): void {
     reply.setCookie(COOKIE_NAME, token, {
       httpOnly: true,
+      secure: !adminConfig.insecureAllowHttpCookies,
       sameSite: "strict",
       path: "/admin",
     });
   }
 
   function clearSessionCookie(reply: FastifyReply): void {
-    reply.clearCookie(COOKIE_NAME, { path: "/admin" });
+    reply.clearCookie(COOKIE_NAME, {
+      path: "/admin",
+      secure: !adminConfig.insecureAllowHttpCookies,
+    });
   }
 
   async function requireAuth(
@@ -302,10 +306,11 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
   // ── Logout ────────────────────────────────────────────────────────────────
 
   app.post("/admin/logout", async (request, reply) => {
-    const token = getSessionToken(request);
-    if (token) {
-      deleteSession(db, token);
-    }
+    const token = await requireAuth(request, reply);
+    if (!token) return;
+    if (!requireCsrf(request, reply, token)) return;
+
+    deleteSession(db, token);
     clearSessionCookie(reply);
     appendAuditEvent(db, "logout", clientIp(request));
     return reply.redirect("/admin/login");
@@ -442,7 +447,15 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
       setSessionCookie(reply, rotated.sessionToken);
     }
 
-    return reply.redirect("/admin/dashboard");
+    return reply.type("text/html").send(
+      htmlPage(
+        "Configuration Saved",
+        `<h2>Configuration Saved</h2>
+        <p>The validated configuration was written atomically and backed up.</p>
+        <p><strong>Restart required:</strong> restart the gateway process to apply the saved configuration.</p>
+        <a href="/admin/dashboard">Back to dashboard</a>`,
+      ),
+    );
   });
 
   // ── Token management ──────────────────────────────────────────────────────

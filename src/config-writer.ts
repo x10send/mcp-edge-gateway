@@ -1,5 +1,6 @@
 import {
   copyFileSync,
+  chmodSync,
   openSync,
   closeSync,
   fsyncSync,
@@ -34,7 +35,9 @@ export function writeConfigAtomic(configPath: string, content: string): void {
 
     backupCurrent(configPath, dir, base);
     renameSync(tempPath, configPath);
+    fsyncPath(dir);
     pruneBackups(dir, base);
+    fsyncPath(dir);
   } catch (error) {
     rmSync(tempPath, { force: true });
     throw error;
@@ -71,6 +74,8 @@ function backupCurrent(configPath: string, dir: string, base: string): void {
   const backupPath = join(dir, `${base}.${ts}.bak`);
   try {
     copyFileSync(configPath, backupPath);
+    chmodSync(backupPath, 0o600);
+    fsyncPath(backupPath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;

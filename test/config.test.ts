@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { parse, stringify } from "yaml";
 import { loadConfig } from "../src/config.js";
 
 test("loadConfig applies server defaults", () => {
@@ -18,7 +19,9 @@ routes:
     logLevel: "info",
   });
   assert.equal(config.security.allowPrivateUpstreamsOnly, true);
+  assert.equal(config.security.publicOrigin, "http://localhost:8788");
   assert.deepEqual(config.security.allowedHosts, ["localhost", "127.0.0.1"]);
+  assert.equal(config.admin.insecureAllowHttpCookies, false);
   assert.equal(config.routes[0]?.upstream, "http://unraid-agent.local:8043/");
 });
 
@@ -259,6 +262,81 @@ routes:
   assert.equal(config.security.requireAuth, true);
 });
 
+test("loadConfig rejects unauthenticated MCP without an explicit insecure override", () => {
+  assert.throws(
+    () =>
+      loadYaml(
+        `
+security:
+  requireAuth: false
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+`,
+        false,
+      ),
+    /insecureAllowUnauthenticatedMcp/,
+  );
+});
+
+test("loadConfig validates and normalizes the explicit public origin", () => {
+  const config = loadYaml(`
+security:
+  publicOrigin: https://mcp.example.com:443
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+`);
+  assert.equal(config.security.publicOrigin, "https://mcp.example.com");
+
+  assert.throws(
+    () =>
+      loadYaml(`
+security:
+  publicOrigin: https://mcp.example.com/path
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+`),
+    /valid HTTP or HTTPS origin/,
+  );
+});
+
+test("loadConfig requires an explicit public origin", () => {
+  assert.throws(
+    () =>
+      loadYaml(
+        `
+security:
+  requireAuth: true
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+`,
+        false,
+      ),
+    /security.publicOrigin/,
+  );
+});
+
+test("loadConfig rejects an HTTP public origin without an explicit insecure override", () => {
+  assert.throws(
+    () =>
+      loadYaml(
+        `
+security:
+  publicOrigin: http://localhost:8788
+  requireAuth: true
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+`,
+        false,
+      ),
+    /insecureAllowHttpPublicOrigin/,
+  );
+});
+
 test("loadConfig accepts route-level requiredScopes", () => {
   const config = loadYaml(`
 routes:
@@ -269,6 +347,20 @@ routes:
       - write
 `);
   assert.deepEqual(config.routes[0]?.requiredScopes, ["read", "write"]);
+});
+
+test("loadConfig rejects OAuth scopes that cannot be safely advertised", () => {
+  assert.throws(
+    () =>
+      loadYaml(`
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+    requiredScopes:
+      - "read scope"
+`),
+    /invalid OAuth scope/,
+  );
 });
 
 test("loadConfig accepts toolScopes in route tools", () => {
@@ -318,10 +410,38 @@ routes:
   );
 });
 
-function loadYaml(contents: string) {
+function loadYaml(contents: string, addDevelopmentOverride = true) {
   const directory = mkdtempSync(join(tmpdir(), "mcp-edge-gateway-"));
   const file = join(directory, "gateway.yaml");
-  writeFileSync(file, contents);
+  let yaml = contents;
+  if (addDevelopmentOverride) {
+    const config = parse(contents) as Record<string, unknown>;
+    if (typeof config === "object" && config !== null) {
+      if (config.security === undefined) {
+        config.security = {
+          publicOrigin: "http://localhost:8788",
+          insecureAllowHttpPublicOrigin: true,
+          insecureAllowUnauthenticatedMcp: true,
+        };
+      } else if (
+        typeof config.security === "object" &&
+        config.security !== null &&
+        !Array.isArray(config.security)
+      ) {
+        const security = config.security as Record<string, unknown>;
+        security.publicOrigin ??= "http://localhost:8788";
+        security.insecureAllowHttpPublicOrigin ??= true;
+        if (
+          security.requireAuth !== true &&
+          security.insecureAllowUnauthenticatedMcp === undefined
+        ) {
+          security.insecureAllowUnauthenticatedMcp = true;
+        }
+      }
+      yaml = stringify(config);
+    }
+  }
+  writeFileSync(file, yaml);
 
   try {
     return loadConfig(file);

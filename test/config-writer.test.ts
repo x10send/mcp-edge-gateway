@@ -12,6 +12,10 @@ import test from "node:test";
 import { writeConfigAtomic } from "../src/config-writer.js";
 
 const VALID_CONFIG = `
+security:
+  publicOrigin: http://localhost:8788
+  insecureAllowHttpPublicOrigin: true
+  insecureAllowUnauthenticatedMcp: true
 routes:
   - path: /unraid
     upstream: http://unraid-agent.local:8043

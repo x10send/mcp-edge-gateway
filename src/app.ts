@@ -69,6 +69,22 @@ export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
   if (diagnosticToken && diagnosticToken.length < 32) {
     throw new Error("Diagnostics token must contain at least 32 characters");
   }
+  if (
+    !config.security.requireAuth &&
+    !config.security.insecureAllowUnauthenticatedMcp
+  ) {
+    throw new Error(
+      "Unauthenticated MCP requires security.insecureAllowUnauthenticatedMcp",
+    );
+  }
+  if (
+    config.security.publicOrigin.startsWith("http:") &&
+    !config.security.insecureAllowHttpPublicOrigin
+  ) {
+    throw new Error(
+      "HTTP publicOrigin requires security.insecureAllowHttpPublicOrigin",
+    );
+  }
 
   // Fail fast if auth is required by config but no database was provided.
   // Without a db, routeAuth is undefined and auth checks are silently skipped.
@@ -104,10 +120,9 @@ export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
     status: "ok",
   }));
 
-  app.get("/.well-known/oauth-protected-resource", async (request, reply) => {
-    const host = request.headers.host ?? request.hostname;
+  app.get("/.well-known/oauth-protected-resource", async (_request, reply) => {
     return reply.type("application/json").send({
-      resource: `${request.protocol}://${host}`,
+      resource: config.security.publicOrigin,
       bearer_methods_supported: ["header"],
     });
   });
@@ -177,6 +192,8 @@ export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
     const sseUpstream = appendSubpath(route.upstream, "/sse");
     const messagesUpstream = appendSubpath(route.upstream, "/messages");
     const messagesGatewayPath = `${route.path}/messages`;
+    const protectedResourcePath = `/.well-known/oauth-protected-resource${route.path}/mcp`;
+    const protectedResource = `${config.security.publicOrigin}${route.path}/mcp`;
 
     const routeAuth: RouteAuthOptions | undefined = db
       ? {
@@ -188,16 +205,12 @@ export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
       : undefined;
 
     // Per-route protected resource metadata (RFC 9728)
-    app.get(
-      `${route.path}/.well-known/oauth-protected-resource`,
-      async (request, reply) => {
-        const host = request.headers.host ?? request.hostname;
-        return reply.type("application/json").send({
-          resource: `${request.protocol}://${host}${route.path}`,
-          bearer_methods_supported: ["header"],
-        });
-      },
-    );
+    app.get(protectedResourcePath, async (_request, reply) => {
+      return reply.type("application/json").send({
+        resource: protectedResource,
+        bearer_methods_supported: ["header"],
+      });
+    });
 
     // Streamable HTTP transport
     app.route({
@@ -284,14 +297,17 @@ function createProxyHandler(
       routeAuth &&
       (routeAuth.requireAuth || routeAuth.requiredScopes.length > 0)
     ) {
-      const host = request.headers.host ?? request.hostname;
-      const metadataUrl = `${request.protocol}://${host}${routePath}/.well-known/oauth-protected-resource`;
+      const metadataUrl = `${config.security.publicOrigin}/.well-known/oauth-protected-resource${routePath}/mcp`;
+      const requiredScopeParameter =
+        routeAuth.requiredScopes.length > 0
+          ? `, scope="${routeAuth.requiredScopes.join(" ")}"`
+          : "";
       const authHeader = request.headers.authorization;
       // RFC 7235 §2.1: auth-scheme is case-insensitive
       if (!authHeader || !/^bearer /i.test(authHeader)) {
         reply.header(
           "WWW-Authenticate",
-          `Bearer realm="MCP Gateway", resource_metadata="${metadataUrl}"`,
+          `Bearer realm="MCP Gateway", resource_metadata="${metadataUrl}"${requiredScopeParameter}`,
         );
         return reply.code(401).send({ error: "Authorization required" });
       }
@@ -303,7 +319,7 @@ function createProxyHandler(
       if (!tokenResult) {
         reply.header(
           "WWW-Authenticate",
-          `Bearer realm="MCP Gateway", error="invalid_token", resource_metadata="${metadataUrl}"`,
+          `Bearer realm="MCP Gateway", error="invalid_token", resource_metadata="${metadataUrl}"${requiredScopeParameter}`,
         );
         return reply.code(401).send({ error: "Invalid or expired token" });
       }
@@ -422,8 +438,7 @@ function createProxyHandler(
       reply.raw.once("finish", release);
 
       if (sseEndpointGatewayPath) {
-        const host = request.headers.host ?? request.hostname;
-        const messagesUrl = `${request.protocol}://${host}${sseEndpointGatewayPath}`;
+        const messagesUrl = `${config.security.publicOrigin}${sseEndpointGatewayPath}`;
         return reply.send(
           Readable.from(rewriteSseEndpointEvent(upstream.body, messagesUrl)),
         );

@@ -36,6 +36,9 @@ listener must not be forwarded through Cloudflare Tunnel. See
 [`ProjectSpec.md`](./ProjectSpec.md) for the planned security boundaries.
 OAuth tokens, passwords, and client secrets will be stored separately from
 `gateway.yaml`; public examples will never include deployment credentials.
+Admin session cookies are secure by default. Put the LAN-only admin listener
+behind HTTPS, or explicitly enable `admin.insecureAllowHttpCookies` only for an
+isolated direct-HTTP LAN setup.
 
 ## Configuration
 
@@ -53,11 +56,15 @@ diagnostics:
   tokenEnv: GATEWAY_DIAGNOSTICS_TOKEN
 
 security:
+  publicOrigin: http://localhost:8788
+  insecureAllowHttpPublicOrigin: true
   allowedHosts:
     - localhost
     - 127.0.0.1
   trustedProxies: []
   allowPrivateUpstreamsOnly: true
+  requireAuth: false
+  insecureAllowUnauthenticatedMcp: true
 
 tools:
   defaultDenyDangerousTools: true
@@ -80,6 +87,10 @@ the upstream server.
 The default security configuration accepts local host headers, trusts no
 reverse proxies, limits request sizes and stream lifetimes, and permits only
 private-network MCP upstreams. Add deployment-specific hostnames explicitly.
+The example opts into unauthenticated MCP only for LAN development. Before any
+external exposure, set an explicit HTTPS `publicOrigin`, set `requireAuth:
+true`, and remove `insecureAllowHttpPublicOrigin` and
+`insecureAllowUnauthenticatedMcp`.
 Optional `/diagnostics` output is disabled unless configured with a local
 `GATEWAY_DIAGNOSTICS_TOKEN` containing at least 32 characters.
 
@@ -129,7 +140,7 @@ Create the config directory and place the YAML file there:
 ```bash
 mkdir -p /mnt/user/appdata/mcp-edge-gateway
 cp gateway.example.yaml /mnt/user/appdata/mcp-edge-gateway/gateway.yaml
-printf 'GATEWAY_CONFIG_FILE=/mnt/user/appdata/mcp-edge-gateway/gateway.yaml\n' > .env
+printf 'GATEWAY_CONFIG_DIR=/mnt/user/appdata/mcp-edge-gateway\n' > .env
 ```
 
 Build and start the container from this repository:
@@ -139,15 +150,28 @@ docker compose up -d --build
 curl http://localhost:8788/health
 ```
 
-The compose file publishes port `8788` and mounts the YAML config read-only.
+The default Compose profile publishes port `8788` and mounts `/config`
+read-only, with a separate writable `/config/state` mount.
 The ignored `.env` file keeps the machine-specific mount path out of source
-control. For local development, the default mount path is the ignored
-`./gateway.yaml`.
+control. For local container development, place the YAML file at the ignored
+`./config/gateway.yaml`.
 After changing the YAML file, restart the container:
 
 ```bash
 docker compose restart mcp-edge-gateway
 ```
+
+When the administration listener is enabled, mount `/config` read-write so
+atomic YAML replacement and backups can work. Set `admin.host: 0.0.0.0`, choose
+a reviewed LAN bind address, and use the admin override:
+
+```bash
+printf 'GATEWAY_ADMIN_BIND_ADDRESS=127.0.0.1\n' >> .env
+docker compose -f docker-compose.yml -f docker-compose.admin.yml up -d --build
+```
+
+Keep the admin bind address LAN-only. Do not forward port `8789` through
+Cloudflare Tunnel.
 
 ## Container Releases
 
