@@ -318,8 +318,10 @@ one-time setup credential and must not create a default password.
 ### Current Exposure Status
 
 The `v0.1.0` image is a development baseline and must not be exposed to
-untrusted clients. Phase 0 hardening is implemented on `main`, but OAuth
-authentication and scope enforcement are not implemented yet.
+untrusted clients. Phase 0 runtime and active CI hardening are implemented on
+`main`, but OAuth authentication and scope enforcement are not implemented yet.
+Automatic CodeQL and required branch protection remain deferred while the
+repository is private on a GitHub plan that does not enable those controls.
 
 Do not configure Cloudflare Tunnel access to MCP routes until Phases 1 through
 5 are complete and a security-reviewed release is published.
@@ -470,8 +472,10 @@ Authentication and administration changes require regression coverage for:
 
 ## Roadmap
 
-Complete the implementation phases above in order. Phase 0 is implemented on
-`main`. Phases 1 through 5 remain required before external MCP exposure.
+Complete the implementation phases above in order. Phase 0 runtime and active
+CI controls are implemented on `main`; its GitHub-hosted CodeQL and branch
+protection tasks remain deferred while the repository is private on the current
+plan. Phases 1 through 5 remain required before external MCP exposure.
 
 CodeQL is checked in but manual while the repository remains private because
 GitHub requires Advanced Security for private-repository result uploads. Enable
