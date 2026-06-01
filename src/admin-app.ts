@@ -342,7 +342,7 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
         <h3>Active Routes</h3>
         <ul>${routeList}</ul>
         <h3>Admin Listener</h3>
-        <p>Port: ${adminConfig.port} | Host: ${escapeHtml(adminConfig.host)}</p>`,
+        <p>Port: ${escapeHtml(String(adminConfig.port))} | Host: ${escapeHtml(adminConfig.host)}</p>`,
       ),
     );
   });
@@ -457,6 +457,155 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
         `<h2>Configuration Saved</h2>
         <p>The validated configuration was written atomically and backed up.</p>
         <p><strong>Restart required:</strong> restart the gateway process to apply the saved configuration.</p>
+        <a href="/admin/dashboard">Back to dashboard</a>`,
+      ),
+    );
+  });
+
+  // ── Server / admin settings ───────────────────────────────────────────────
+
+  app.get("/admin/settings", async (request, reply) => {
+    const sessionToken = await requireAuth(request, reply);
+    if (!sessionToken) return;
+    const session = lookupSession(db, sessionToken)!;
+
+    const logLevelOptions = ["debug", "info", "warn", "error"]
+      .map(
+        (l) =>
+          `<option${l === config.server.logLevel ? " selected" : ""}>${l}</option>`,
+      )
+      .join("");
+
+    return reply.type("text/html").send(
+      htmlPage(
+        "Server Settings",
+        `<h2>Server Settings</h2>
+        <nav>${navLinks(session.csrfToken)}</nav>
+        <form method="POST" action="/admin/settings">
+          <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(session.csrfToken)}">
+          <fieldset><legend>Public MCP Listener</legend>
+            <label>Bind address (server.host)<br>
+              <input name="serverHost" type="text" value="${escapeHtml(config.server.host)}" required style="width:20em">
+            </label>
+            <small>Use <code>0.0.0.0</code> to accept connections from outside the container, or <code>127.0.0.1</code> for loopback only.</small><br><br>
+            <label>Port (server.port)<br>
+              <input name="serverPort" type="number" min="1" max="65535" value="${escapeHtml(String(config.server.port))}" required style="width:8em">
+            </label><br><br>
+            <label>Log level (server.logLevel)<br>
+              <select name="serverLogLevel">${logLevelOptions}</select>
+            </label>
+          </fieldset><br>
+          <fieldset><legend>Admin Listener</legend>
+            <label>Bind address (admin.host)<br>
+              <input name="adminHost" type="text" value="${escapeHtml(config.admin.host)}" required style="width:20em">
+            </label>
+            <small>Use <code>0.0.0.0</code> to access the admin UI from outside the container. Default is <code>127.0.0.1</code> (loopback only).</small><br><br>
+            <label>Port (admin.port)<br>
+              <input name="adminPort" type="number" min="1" max="65535" value="${escapeHtml(String(config.admin.port))}" required style="width:8em">
+            </label><br><br>
+            <label>
+              <input name="adminInsecureAllowHttpCookies" type="checkbox"${config.admin.insecureAllowHttpCookies ? " checked" : ""} value="1">
+              Allow HTTP cookies (admin.insecureAllowHttpCookies) — required for non-HTTPS LAN access
+            </label>
+          </fieldset><br>
+          <button type="submit">Save settings</button>
+          &nbsp;<small>A gateway restart is required for changes to take effect.</small>
+        </form>`,
+      ),
+    );
+  });
+
+  app.post("/admin/settings", async (request, reply) => {
+    const sessionToken = await requireAuth(request, reply);
+    if (!sessionToken) return;
+    if (!requireCsrf(request, reply, sessionToken)) return;
+
+    const body = request.body as Record<string, string>;
+    const serverHost = (body.serverHost ?? "").trim();
+    const serverPort = parseInt(body.serverPort ?? "", 10);
+    const serverLogLevel = (body.serverLogLevel ?? "info").trim();
+    const adminHost = (body.adminHost ?? "").trim();
+    const adminPort = parseInt(body.adminPort ?? "", 10);
+    const adminInsecureAllowHttpCookies =
+      body.adminInsecureAllowHttpCookies === "1";
+
+    const VALID_LOG_LEVELS = ["debug", "info", "warn", "error"];
+    if (
+      !serverHost ||
+      isNaN(serverPort) ||
+      serverPort < 1 ||
+      serverPort > 65535 ||
+      !VALID_LOG_LEVELS.includes(serverLogLevel) ||
+      !adminHost ||
+      isNaN(adminPort) ||
+      adminPort < 1 ||
+      adminPort > 65535 ||
+      serverPort === adminPort
+    ) {
+      return reply
+        .code(400)
+        .type("text/html")
+        .send(
+          htmlPage(
+            "Settings Error",
+            `<p>Invalid settings: ports must be 1–65535, must not conflict, and log level must be debug/info/warn/error.</p><a href="/admin/settings">← Back</a>`,
+          ),
+        );
+    }
+
+    let newYaml: string;
+    try {
+      newYaml = setServerSettingsInYaml(configPath, {
+        serverHost,
+        serverPort,
+        serverLogLevel,
+        adminHost,
+        adminPort,
+        adminInsecureAllowHttpCookies,
+      });
+    } catch (error) {
+      return reply
+        .code(400)
+        .type("text/html")
+        .send(
+          htmlPage(
+            "Settings Error",
+            `<p>${error instanceof Error ? escapeHtml(error.message) : "Unknown error"}</p>
+            <a href="/admin/settings">← Back</a>`,
+          ),
+        );
+    }
+
+    try {
+      writeConfigAtomic(configPath, newYaml);
+    } catch (error) {
+      return reply
+        .code(400)
+        .type("text/html")
+        .send(
+          htmlPage(
+            "Save Failed",
+            `<pre>${error instanceof Error ? escapeHtml(error.message) : "Unknown error"}</pre>
+            <a href="/admin/settings">← Back</a>`,
+          ),
+        );
+    }
+
+    const ip = clientIp(request);
+    appendAuditEvent(db, "settings_saved", ip);
+    options.onConfigSaved?.();
+
+    const rotated = rotateSession(db, adminConfig, sessionToken, ip);
+    if (rotated) {
+      setSessionCookie(reply, rotated.sessionToken);
+    }
+
+    return reply.type("text/html").send(
+      htmlPage(
+        "Settings Saved",
+        `<h2>Settings Saved</h2>
+        <p>Server and admin listener settings saved successfully.</p>
+        <p><strong>Restart required</strong> to apply the new settings.</p>
         <a href="/admin/dashboard">Back to dashboard</a>`,
       ),
     );
@@ -902,7 +1051,9 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
     }
 
     const cachedTools = getCachedTools(db, routePath);
-    const currentAllowlist = new Set(route.tools?.allowlist ?? []);
+    const currentAllowlist = new Set(
+      getAllowlistFromYaml(configPath, routePath),
+    );
     const DANGEROUS = new Set([
       "shell",
       "exec",
@@ -1192,6 +1343,64 @@ function setRouteAllowlistInYaml(
   return yamlStringify(doc, { lineWidth: 0 });
 }
 
+function getAllowlistFromYaml(configPath: string, routePath: string): string[] {
+  try {
+    const doc = readParsedYaml(configPath);
+    if (!Array.isArray(doc.routes)) return [];
+    const route = doc.routes.find(
+      (r) =>
+        typeof r === "object" &&
+        r !== null &&
+        (r as Record<string, unknown>).path === routePath,
+    ) as Record<string, unknown> | undefined;
+    if (!route) return [];
+    const tools = route.tools;
+    if (typeof tools !== "object" || tools === null) return [];
+    const allowlist = (tools as Record<string, unknown>).allowlist;
+    return Array.isArray(allowlist)
+      ? allowlist.filter((x): x is string => typeof x === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function setServerSettingsInYaml(
+  configPath: string,
+  settings: {
+    serverHost: string;
+    serverPort: number;
+    serverLogLevel: string;
+    adminHost: string;
+    adminPort: number;
+    adminInsecureAllowHttpCookies: boolean;
+  },
+): string {
+  const doc = readParsedYaml(configPath);
+
+  if (typeof doc.server !== "object" || doc.server === null) {
+    doc.server = {};
+  }
+  const server = doc.server as Record<string, unknown>;
+  server.host = settings.serverHost;
+  server.port = settings.serverPort;
+  server.logLevel = settings.serverLogLevel;
+
+  if (typeof doc.admin !== "object" || doc.admin === null) {
+    doc.admin = {};
+  }
+  const admin = doc.admin as Record<string, unknown>;
+  admin.host = settings.adminHost;
+  admin.port = settings.adminPort;
+  if (settings.adminInsecureAllowHttpCookies) {
+    admin.insecureAllowHttpCookies = true;
+  } else {
+    delete admin.insecureAllowHttpCookies;
+  }
+
+  return yamlStringify(doc, { lineWidth: 0 });
+}
+
 // ── Route tool cache (DB) ─────────────────────────────────────────────────────
 
 interface CachedTool {
@@ -1284,6 +1493,7 @@ ${body}
 function navLinks(csrfToken: string): string {
   return `<a href="/admin/dashboard">Dashboard</a>
           <a href="/admin/routes">Routes</a>
+          <a href="/admin/settings">Settings</a>
           <a href="/admin/config">Edit Config</a>
           <a href="/admin/tokens">Tokens</a>
           <a href="/admin/oauth-user">OAuth User</a>

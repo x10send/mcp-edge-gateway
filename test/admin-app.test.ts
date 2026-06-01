@@ -1061,3 +1061,78 @@ test("POST /admin/oauth-user stores a separate OAuth password", async () => {
     await ctx.cleanup();
   }
 });
+
+test("GET /admin/settings shows current server and admin settings", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie } = await doSetup(ctx);
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/admin/settings",
+      headers: { cookie },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.ok(res.body.includes("server.host"));
+    assert.ok(res.body.includes("admin.host"));
+    assert.ok(res.body.includes("0.0.0.0"));
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("GET /admin/settings requires authentication", async () => {
+  const ctx = setupTest();
+  try {
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/admin/settings",
+    });
+    assert.equal(res.statusCode, 302);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("POST /admin/settings saves server and admin host settings to gateway.yaml", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie, csrfToken } = await doSetup(ctx);
+    const payload = [
+      `_csrf=${encodeURIComponent(csrfToken)}`,
+      `serverHost=0.0.0.0`,
+      `serverPort=8788`,
+      `serverLogLevel=info`,
+      `adminHost=0.0.0.0`,
+      `adminPort=8789`,
+    ].join("&");
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/settings",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      payload,
+    });
+    assert.equal(res.statusCode, 200);
+    assert.ok(res.body.includes("Settings Saved"));
+    assert.ok(res.body.includes("Restart required"));
+    const written = readFileSync(ctx.configPath, "utf8");
+    assert.ok(written.includes("host: 0.0.0.0"));
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("POST /admin/settings requires CSRF token", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie } = await doSetup(ctx);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/settings",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      payload: `serverHost=0.0.0.0&serverPort=8788&serverLogLevel=info&adminHost=0.0.0.0&adminPort=8789`,
+    });
+    assert.equal(res.statusCode, 403);
+  } finally {
+    await ctx.cleanup();
+  }
+});
