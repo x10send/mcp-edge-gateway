@@ -7,6 +7,7 @@ import { buildAdminApp } from "../src/admin-app.js";
 import { buildApp } from "../src/app.js";
 import { StateStore, MIGRATIONS } from "../src/state.js";
 import { consumeBootstrap, initBootstrap } from "../src/admin-auth.js";
+import { issueToken } from "../src/oauth-token-store.js";
 import type { GatewayConfig } from "../src/config.js";
 
 const VALID_YAML = `
@@ -30,6 +31,7 @@ const BASE_CONFIG: GatewayConfig = {
     allowedHosts: ["localhost", "127.0.0.1"],
     trustedProxies: [],
     allowPrivateUpstreamsOnly: true,
+    requireAuth: false,
     bodyLimitBytes: 1_048_576,
     jsonResponseLimitBytes: 4_194_304,
     maxConcurrentRequests: 100,
@@ -619,6 +621,195 @@ test("GET /admin/health returns ok", async () => {
     const res = await ctx.app.inject({ method: "GET", url: "/admin/health" });
     assert.equal(res.statusCode, 200);
     assert.deepEqual(res.json(), { status: "ok" });
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// ── Token management ──────────────────────────────────────────────────────────
+
+test("GET /admin/tokens requires authentication", async () => {
+  const ctx = setupTest();
+  try {
+    const res = await ctx.app.inject({ method: "GET", url: "/admin/tokens" });
+    assert.equal(res.statusCode, 302);
+    assert.ok((res.headers.location as string).includes("/admin/login"));
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("GET /admin/tokens lists issued tokens for authenticated users", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie } = await doSetup(ctx);
+    issueToken(ctx.db, { description: "my-token", scope: "read" });
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/admin/tokens",
+      headers: { cookie },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.ok(res.body.includes("my-token"));
+    assert.ok(res.body.includes("active"));
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("GET /admin/tokens shows empty state when no tokens exist", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie } = await doSetup(ctx);
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/admin/tokens",
+      headers: { cookie },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.ok(res.body.includes("No tokens issued"));
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("GET /admin/tokens/new requires authentication", async () => {
+  const ctx = setupTest();
+  try {
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/admin/tokens/new",
+    });
+    assert.equal(res.statusCode, 302);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("GET /admin/tokens/new shows the token creation form", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie } = await doSetup(ctx);
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/admin/tokens/new",
+      headers: { cookie },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.ok(
+      res.body.includes("Issue Token") || res.body.includes("Issue New Token"),
+    );
+    assert.ok(res.body.includes("Scope"));
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("POST /admin/tokens issues a token and shows the plaintext once", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie, csrfToken } = await doSetup(ctx);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/tokens",
+      payload: `_csrf=${encodeURIComponent(csrfToken)}&description=test+token&scope=read`,
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie,
+      },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.ok(res.body.includes("Token Issued"));
+    assert.ok(res.body.includes("will not be shown again"));
+    // The plaintext token should appear in the response
+    const tokens = ctx.db.prepare("SELECT id FROM oauth_tokens").all() as {
+      id: number;
+    }[];
+    assert.equal(tokens.length, 1);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("POST /admin/tokens requires CSRF token", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie } = await doSetup(ctx);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/tokens",
+      payload: "description=test&scope=read",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie,
+      },
+    });
+    assert.equal(res.statusCode, 403);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("POST /admin/tokens/:id/revoke revokes the token and redirects", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie, csrfToken } = await doSetup(ctx);
+    const { id } = issueToken(ctx.db, { description: "to-revoke" });
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/admin/tokens/${id}/revoke`,
+      payload: `_csrf=${encodeURIComponent(csrfToken)}`,
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie,
+      },
+    });
+    assert.equal(res.statusCode, 302);
+    assert.ok((res.headers.location as string).includes("/admin/tokens"));
+    // Verify revoked in DB
+    const row = ctx.db
+      .prepare("SELECT revoked_at FROM oauth_tokens WHERE id = ?")
+      .get(id) as { revoked_at: number | null };
+    assert.ok(row.revoked_at !== null, "token should be revoked");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("POST /admin/tokens/:id/revoke rejects non-numeric id", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie, csrfToken } = await doSetup(ctx);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/tokens/not-a-number/revoke",
+      payload: `_csrf=${encodeURIComponent(csrfToken)}`,
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie,
+      },
+    });
+    assert.equal(res.statusCode, 400);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("POST /admin/tokens/:id/revoke requires CSRF token", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie } = await doSetup(ctx);
+    const { id } = issueToken(ctx.db, {});
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/admin/tokens/${id}/revoke`,
+      payload: "",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie,
+      },
+    });
+    assert.equal(res.statusCode, 403);
   } finally {
     await ctx.cleanup();
   }

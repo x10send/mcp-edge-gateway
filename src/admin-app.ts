@@ -25,6 +25,12 @@ import {
   validateBootstrapToken,
   verifyAdminPassword,
 } from "./admin-auth.js";
+import {
+  issueToken,
+  listTokens,
+  revokeToken,
+  tokenStatus,
+} from "./oauth-token-store.js";
 
 const COOKIE_NAME = "mcp_admin_session";
 const CSRF_FIELD = "_csrf";
@@ -439,6 +445,164 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
     return reply.redirect("/admin/dashboard");
   });
 
+  // ── Token management ──────────────────────────────────────────────────────
+
+  app.get("/admin/tokens", async (request, reply) => {
+    const sessionToken = await requireAuth(request, reply);
+    if (!sessionToken) return;
+
+    const session = lookupSession(db, sessionToken)!;
+    const tokens = listTokens(db);
+    const rows = tokens
+      .map((t) => {
+        const status = tokenStatus(t);
+        const statusLabel =
+          status === "active"
+            ? "active"
+            : status === "expired"
+              ? "expired"
+              : "revoked";
+        return `<tr>
+          <td>${t.id}</td>
+          <td>${escapeHtml(t.description ?? "")}</td>
+          <td><code>${escapeHtml(t.scope || "(none)")}</code></td>
+          <td>${escapeHtml(t.routes === "*" ? "all routes" : t.routes)}</td>
+          <td>${statusLabel}</td>
+          <td>
+            ${
+              status === "active"
+                ? `<form method="POST" action="/admin/tokens/${t.id}/revoke" style="display:inline">
+                <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(session.csrfToken)}">
+                <button type="submit">Revoke</button>
+              </form>`
+                : ""
+            }
+          </td>
+        </tr>`;
+      })
+      .join("\n");
+
+    return reply.type("text/html").send(
+      htmlPage(
+        "Tokens",
+        `<h2>OAuth Tokens</h2>
+        <nav>${navLinks(session.csrfToken)}</nav>
+        <p><a href="/admin/tokens/new">+ Issue new token</a></p>
+        <table border="1" cellpadding="4" style="border-collapse:collapse;width:100%">
+          <thead><tr>
+            <th>ID</th><th>Description</th><th>Scope</th><th>Routes</th><th>Status</th><th>Actions</th>
+          </tr></thead>
+          <tbody>${rows || "<tr><td colspan='6'>No tokens issued.</td></tr>"}</tbody>
+        </table>`,
+      ),
+    );
+  });
+
+  app.get("/admin/tokens/new", async (request, reply) => {
+    const sessionToken = await requireAuth(request, reply);
+    if (!sessionToken) return;
+
+    const session = lookupSession(db, sessionToken)!;
+    const routeList = config.routes
+      .map(
+        (r) =>
+          `<option value="${escapeHtml(r.path)}">${escapeHtml(r.path)}</option>`,
+      )
+      .join("\n");
+
+    return reply.type("text/html").send(
+      htmlPage(
+        "Issue Token",
+        `<h2>Issue New Token</h2>
+        <nav>${navLinks(session.csrfToken)}</nav>
+        <form method="POST" action="/admin/tokens">
+          <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(session.csrfToken)}">
+          <label>Description (optional)<br>
+            <input name="description" type="text" style="width:100%">
+          </label><br><br>
+          <label>Scope (space-separated, optional)<br>
+            <input name="scope" type="text" placeholder="read write" style="width:100%">
+          </label><br><br>
+          <label>Routes (leave blank for all routes)<br>
+            <select name="routes" multiple size="4" style="width:100%">
+              ${routeList}
+            </select>
+          </label><br><br>
+          <label>Expires in days (0 = no expiry)<br>
+            <input name="expiresInDays" type="number" min="0" value="0" style="width:8em">
+          </label><br><br>
+          <button type="submit">Issue Token</button>
+        </form>`,
+      ),
+    );
+  });
+
+  app.post("/admin/tokens", async (request, reply) => {
+    const sessionToken = await requireAuth(request, reply);
+    if (!sessionToken) return;
+    if (!requireCsrf(request, reply, sessionToken)) return;
+
+    const session = lookupSession(db, sessionToken)!;
+    const body = request.body as Record<string, string | string[]>;
+    const description =
+      (body.description as string | undefined)?.trim() || undefined;
+    const scope = ((body.scope as string | undefined) ?? "").trim();
+    const routesRaw = body.routes;
+    const routes = Array.isArray(routesRaw)
+      ? routesRaw.filter(Boolean)
+      : typeof routesRaw === "string" && routesRaw
+        ? [routesRaw]
+        : [];
+    const expiresInDays = parseInt(
+      (body.expiresInDays as string | undefined) ?? "0",
+      10,
+    );
+    const expiresAt =
+      expiresInDays > 0
+        ? Math.floor(Date.now() / 1000) + expiresInDays * 86400
+        : undefined;
+
+    const { id, plaintext } = issueToken(db, {
+      description,
+      scope,
+      routes,
+      expiresAt,
+    });
+    appendAuditEvent(db, "token_issued", clientIp(request), { id });
+
+    return reply.type("text/html").send(
+      htmlPage(
+        "Token Issued",
+        `<h2>Token Issued</h2>
+        <nav>${navLinks(session.csrfToken)}</nav>
+        <p><strong>Token ID:</strong> ${id}</p>
+        <p><strong>Copy this token now — it will not be shown again:</strong></p>
+        <pre style="background:#fffbe6;border:1px solid #e6c700;padding:1rem;word-break:break-all">${escapeHtml(plaintext)}</pre>
+        <p><a href="/admin/tokens">← Back to tokens</a></p>`,
+      ),
+    );
+  });
+
+  app.post("/admin/tokens/:id/revoke", async (request, reply) => {
+    const sessionToken = await requireAuth(request, reply);
+    if (!sessionToken) return;
+    if (!requireCsrf(request, reply, sessionToken)) return;
+
+    const id = parseInt((request.params as Record<string, string>).id, 10);
+    if (!Number.isFinite(id)) {
+      return reply
+        .code(400)
+        .send(htmlPage("Bad Request", "<p>Invalid token ID.</p>"));
+    }
+
+    const revoked = revokeToken(db, id);
+    if (revoked) {
+      appendAuditEvent(db, "token_revoked", clientIp(request), { id });
+    }
+
+    return reply.redirect("/admin/tokens");
+  });
+
   // ── Health (internal liveness) ────────────────────────────────────────────
 
   app.get("/admin/health", async () => ({ status: "ok" }));
@@ -498,6 +662,7 @@ ${body}
 function navLinks(csrfToken: string): string {
   return `<a href="/admin/dashboard">Dashboard</a>
           <a href="/admin/config">Edit Config</a>
+          <a href="/admin/tokens">Tokens</a>
           <form method="POST" action="/admin/logout" style="display:inline">
             <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(csrfToken)}">
             <button type="submit">Log out</button>

@@ -24,7 +24,7 @@ try {
 }
 
 const config = configService.config;
-const app = buildApp(config);
+const app = buildApp(config, { db: stateStore.database });
 
 // Admin listener
 let adminApp: ReturnType<typeof buildAdminApp> | undefined;

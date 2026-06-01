@@ -226,7 +226,9 @@ export type AuditEventType =
   | "bootstrap_used"
   | "password_changed"
   | "config_saved"
-  | "config_preview";
+  | "config_preview"
+  | "token_issued"
+  | "token_revoked";
 
 export function appendAuditEvent(
   db: DatabaseSync,

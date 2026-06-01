@@ -58,6 +58,22 @@ export const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    name: "003_oauth",
+    sql: `
+      CREATE TABLE oauth_tokens (
+        id          INTEGER PRIMARY KEY,
+        token_hash  TEXT    NOT NULL UNIQUE,
+        description TEXT,
+        scope       TEXT    NOT NULL DEFAULT '',
+        routes      TEXT    NOT NULL DEFAULT '*',
+        expires_at  INTEGER,
+        created_at  INTEGER NOT NULL DEFAULT (unixepoch()),
+        revoked_at  INTEGER
+      );
+      CREATE INDEX oauth_tokens_hash_idx ON oauth_tokens(token_hash);
+    `,
+  },
 ];
 
 export class StateStore {

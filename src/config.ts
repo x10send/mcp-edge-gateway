@@ -7,18 +7,21 @@ export interface ToolPolicyConfig {
   allow?: string[];
   deny?: string[];
   defaultDenyDangerousTools?: boolean;
+  toolScopes?: Record<string, string[]>; // tool name → required OAuth scopes
 }
 
 export interface RouteConfig {
   path: string;
   upstream: string;
   tools?: ToolPolicyConfig;
+  requiredScopes?: string[];
 }
 
 export interface SecurityConfig {
   allowedHosts: string[];
   trustedProxies: string[];
   allowPrivateUpstreamsOnly: boolean;
+  requireAuth: boolean;
   bodyLimitBytes: number;
   jsonResponseLimitBytes: number;
   maxConcurrentRequests: number;
@@ -150,6 +153,10 @@ function parseRoutes(value: unknown, security: SecurityConfig): RouteConfig[] {
         route.tools === undefined
           ? undefined
           : parseToolPolicy(route.tools, `routes[${index}].tools`),
+      requiredScopes: readStringArray(
+        route.requiredScopes,
+        `routes[${index}].requiredScopes`,
+      ),
     };
   });
 }
@@ -237,6 +244,11 @@ function parseSecurity(value: unknown): SecurityConfig {
       "security.allowPrivateUpstreamsOnly",
       true,
     ) as boolean,
+    requireAuth: readBoolean(
+      security.requireAuth,
+      "security.requireAuth",
+      false,
+    ) as boolean,
     bodyLimitBytes: readPositiveInteger(
       security.bodyLimitBytes,
       "security.bodyLimitBytes",
@@ -316,6 +328,7 @@ function parseToolPolicy(value: unknown, field: string): ToolPolicyConfig {
       value.defaultDenyDangerousTools,
       `${field}.defaultDenyDangerousTools`,
     ),
+    toolScopes: readStringRecord(value.toolScopes, `${field}.toolScopes`),
   };
 }
 
@@ -386,6 +399,29 @@ function readPositiveInteger(
     throw new Error(`${field} must be a positive integer`);
   }
   return value as number;
+}
+
+function readStringRecord(
+  value: unknown,
+  field: string,
+): Record<string, string[]> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    throw new Error(`${field} must be an object`);
+  }
+  const result: Record<string, string[]> = {};
+  for (const [key, val] of Object.entries(value)) {
+    if (
+      !Array.isArray(val) ||
+      val.some((s) => typeof s !== "string" || s.length === 0)
+    ) {
+      throw new Error(`${field}.${key} must be an array of non-empty strings`);
+    }
+    result[key] = val as string[];
+  }
+  return result;
 }
 
 function isIpAddress(hostname: string): boolean {

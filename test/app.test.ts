@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import test from "node:test";
 import {
@@ -7,6 +10,9 @@ import {
   type BuildAppOptions,
 } from "../src/app.js";
 import type { GatewayConfig } from "../src/config.js";
+import { issueToken } from "../src/oauth-token-store.js";
+import { StateStore } from "../src/state.js";
+import type { DatabaseSync } from "node:sqlite";
 
 type SendUpstream = NonNullable<BuildAppOptions["sendUpstream"]>;
 type UpstreamResponse = Awaited<ReturnType<SendUpstream>>;
@@ -18,6 +24,7 @@ const config: GatewayConfig = {
     allowedHosts: ["localhost", "127.0.0.1"],
     trustedProxies: [],
     allowPrivateUpstreamsOnly: true,
+    requireAuth: false,
     bodyLimitBytes: 1_048_576,
     jsonResponseLimitBytes: 4_194_304,
     maxConcurrentRequests: 100,
@@ -31,6 +38,19 @@ const config: GatewayConfig = {
   tools: {},
   routes: [{ path: "/unraid", upstream: "http://unraid-agent.local:8043" }],
 };
+
+function makeDb(): { db: DatabaseSync; cleanup: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), "mcp-app-test-"));
+  const store = new StateStore(dir);
+  store.open();
+  return {
+    db: store.database,
+    cleanup: () => {
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
 
 test("health reports liveness without exposing configured routes", async () => {
   const app = buildApp(config);
@@ -575,6 +595,270 @@ test("legacy SSE messages endpoint proxies to upstream /messages with tool polic
   assert.equal(dispatchCount, 1); // only the allowed call reached upstream
 
   await app.close();
+});
+
+test("root protected-resource metadata endpoint returns RFC 9728 document", async () => {
+  const app = buildApp(config);
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/.well-known/oauth-protected-resource",
+    headers: { host: "localhost" },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(
+    response.headers["content-type"],
+    "application/json; charset=utf-8",
+  );
+  const body = response.json();
+  assert.equal(body.resource, "http://localhost");
+  assert.deepEqual(body.bearer_methods_supported, ["header"]);
+  await app.close();
+});
+
+test("per-route protected-resource metadata endpoint returns route-scoped document", async () => {
+  const app = buildApp(config);
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/unraid/.well-known/oauth-protected-resource",
+    headers: { host: "localhost" },
+  });
+
+  assert.equal(response.statusCode, 200);
+  const body = response.json();
+  assert.equal(body.resource, "http://localhost/unraid");
+  assert.deepEqual(body.bearer_methods_supported, ["header"]);
+  await app.close();
+});
+
+test("proxy rejects access_token in query string with 400", async () => {
+  const app = buildApp(config);
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/unraid/mcp?access_token=secret",
+    headers: { host: "localhost" },
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.ok(response.json().error.includes("query string"));
+  await app.close();
+});
+
+test("proxy allows request without auth when requireAuth is false and no requiredScopes", async () => {
+  const { db, cleanup } = makeDb();
+  const sendUpstream = (async () =>
+    upstreamResponse("{}", "application/json")) as SendUpstream;
+  const app = buildApp(config, { sendUpstream, db });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/unraid/mcp",
+    headers: { host: "localhost" },
+  });
+
+  assert.equal(response.statusCode, 200);
+  await app.close();
+  cleanup();
+});
+
+test("proxy requires auth when security.requireAuth is true", async () => {
+  const { db, cleanup } = makeDb();
+  const authConfig: GatewayConfig = {
+    ...config,
+    security: { ...config.security, requireAuth: true },
+  };
+  const app = buildApp(authConfig, { db });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/unraid/mcp",
+    headers: { host: "localhost" },
+  });
+
+  assert.equal(response.statusCode, 401);
+  assert.ok(response.headers["www-authenticate"]);
+  assert.ok(
+    (response.headers["www-authenticate"] as string).includes("Bearer realm"),
+  );
+  await app.close();
+  cleanup();
+});
+
+test("proxy requires auth when route has requiredScopes", async () => {
+  const { db, cleanup } = makeDb();
+  const authConfig: GatewayConfig = {
+    ...config,
+    routes: [
+      {
+        path: "/unraid",
+        upstream: "http://unraid-agent.local:8043",
+        requiredScopes: ["read"],
+      },
+    ],
+  };
+  const app = buildApp(authConfig, { db });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/unraid/mcp",
+    headers: { host: "localhost" },
+  });
+
+  assert.equal(response.statusCode, 401);
+  await app.close();
+  cleanup();
+});
+
+test("proxy returns 401 for invalid Bearer token", async () => {
+  const { db, cleanup } = makeDb();
+  const authConfig: GatewayConfig = {
+    ...config,
+    security: { ...config.security, requireAuth: true },
+  };
+  const app = buildApp(authConfig, { db });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/unraid/mcp",
+    headers: { host: "localhost", authorization: "Bearer invalid-token" },
+  });
+
+  assert.equal(response.statusCode, 401);
+  const wwwAuth = response.headers["www-authenticate"] as string;
+  assert.ok(wwwAuth.includes("invalid_token"));
+  await app.close();
+  cleanup();
+});
+
+test("proxy returns 403 when token lacks required scope", async () => {
+  const { db, cleanup } = makeDb();
+  const { plaintext } = issueToken(db, { scope: "read" });
+  const authConfig: GatewayConfig = {
+    ...config,
+    routes: [
+      {
+        path: "/unraid",
+        upstream: "http://unraid-agent.local:8043",
+        requiredScopes: ["write"],
+      },
+    ],
+  };
+  const app = buildApp(authConfig, { db });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/unraid/mcp",
+    headers: { host: "localhost", authorization: `Bearer ${plaintext}` },
+  });
+
+  assert.equal(response.statusCode, 403);
+  const wwwAuth = response.headers["www-authenticate"] as string;
+  assert.ok(wwwAuth.includes("insufficient_scope"));
+  await app.close();
+  cleanup();
+});
+
+test("proxy allows request with valid token and correct scope", async () => {
+  const { db, cleanup } = makeDb();
+  const { plaintext } = issueToken(db, { scope: "read write" });
+  const sendUpstream = (async () =>
+    upstreamResponse("{}", "application/json")) as SendUpstream;
+  const authConfig: GatewayConfig = {
+    ...config,
+    routes: [
+      {
+        path: "/unraid",
+        upstream: "http://unraid-agent.local:8043",
+        requiredScopes: ["read"],
+      },
+    ],
+  };
+  const app = buildApp(authConfig, { sendUpstream, db });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/unraid/mcp",
+    headers: { host: "localhost", authorization: `Bearer ${plaintext}` },
+  });
+
+  assert.equal(response.statusCode, 200);
+  await app.close();
+  cleanup();
+});
+
+test("proxy returns 403 when token lacks scope for specific tool", async () => {
+  const { db, cleanup } = makeDb();
+  const { plaintext } = issueToken(db, { scope: "read" }); // no 'admin' scope
+  const sendUpstream = (async () =>
+    upstreamResponse("{}", "application/json")) as SendUpstream;
+  const authConfig: GatewayConfig = {
+    ...config,
+    security: { ...config.security, requireAuth: true },
+    routes: [
+      {
+        path: "/unraid",
+        upstream: "http://unraid-agent.local:8043",
+        tools: {
+          toolScopes: { read_status: ["read"], dangerous_op: ["admin"] },
+        },
+      },
+    ],
+  };
+  const app = buildApp(authConfig, { sendUpstream, db });
+
+  const denied = await app.inject({
+    method: "POST",
+    url: "/unraid/mcp",
+    headers: { host: "localhost", authorization: `Bearer ${plaintext}` },
+    payload: {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "dangerous_op" },
+    },
+  });
+  assert.equal(denied.statusCode, 403);
+  assert.ok(denied.json().error.includes("dangerous_op"));
+
+  // Allowed tool (token has 'read' scope)
+  const allowed = await app.inject({
+    method: "POST",
+    url: "/unraid/mcp",
+    headers: { host: "localhost", authorization: `Bearer ${plaintext}` },
+    payload: {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "read_status" },
+    },
+  });
+  assert.equal(allowed.statusCode, 200);
+
+  await app.close();
+  cleanup();
+});
+
+test("proxy returns 401 when token is scoped to a different route", async () => {
+  const { db, cleanup } = makeDb();
+  const { plaintext } = issueToken(db, { routes: ["/other-route"] });
+  const authConfig: GatewayConfig = {
+    ...config,
+    security: { ...config.security, requireAuth: true },
+  };
+  const app = buildApp(authConfig, { db });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/unraid/mcp",
+    headers: { host: "localhost", authorization: `Bearer ${plaintext}` },
+  });
+
+  assert.equal(response.statusCode, 401);
+  await app.close();
+  cleanup();
 });
 
 function upstreamResponse(

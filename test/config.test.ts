@@ -239,6 +239,85 @@ routes:
   );
 });
 
+test("loadConfig applies requireAuth default of false", () => {
+  const config = loadYaml(`
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+`);
+  assert.equal(config.security.requireAuth, false);
+});
+
+test("loadConfig accepts security.requireAuth as boolean", () => {
+  const config = loadYaml(`
+security:
+  requireAuth: true
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+`);
+  assert.equal(config.security.requireAuth, true);
+});
+
+test("loadConfig accepts route-level requiredScopes", () => {
+  const config = loadYaml(`
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+    requiredScopes:
+      - read
+      - write
+`);
+  assert.deepEqual(config.routes[0]?.requiredScopes, ["read", "write"]);
+});
+
+test("loadConfig accepts toolScopes in route tools", () => {
+  const config = loadYaml(`
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+    tools:
+      toolScopes:
+        read_status:
+          - read
+        restart_server:
+          - admin
+`);
+  assert.deepEqual(config.routes[0]?.tools?.toolScopes, {
+    read_status: ["read"],
+    restart_server: ["admin"],
+  });
+});
+
+test("loadConfig rejects toolScopes with non-array value", () => {
+  assert.throws(
+    () =>
+      loadYaml(`
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+    tools:
+      toolScopes:
+        read_status: "read"
+`),
+    /must be an array of non-empty strings/,
+  );
+});
+
+test("loadConfig rejects toolScopes when not an object", () => {
+  assert.throws(
+    () =>
+      loadYaml(`
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+    tools:
+      toolScopes: "invalid"
+`),
+    /toolScopes must be an object/,
+  );
+});
+
 function loadYaml(contents: string) {
   const directory = mkdtempSync(join(tmpdir(), "mcp-edge-gateway-"));
   const file = join(directory, "gateway.yaml");

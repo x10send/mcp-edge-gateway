@@ -1,8 +1,10 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
+import type { DatabaseSync } from "node:sqlite";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { request as defaultSendUpstream, type Dispatcher } from "undici";
 import type { GatewayConfig } from "./config.js";
+import { hasScope, lookupToken } from "./oauth-token-store.js";
 import { ToolPolicy } from "./tool-policy.js";
 import { createUpstreamDispatcher } from "./upstream-dispatcher.js";
 
@@ -39,14 +41,23 @@ export const LOGGER_REDACT_PATHS = [
   "res.headers.set-cookie",
 ];
 
+interface RouteAuthOptions {
+  db: DatabaseSync;
+  requireAuth: boolean;
+  requiredScopes: string[];
+  toolScopes: Record<string, string[]>;
+}
+
 export interface BuildAppOptions {
   sendUpstream?: typeof defaultSendUpstream;
   env?: NodeJS.ProcessEnv;
+  db?: DatabaseSync;
 }
 
 export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
   const sendUpstream = options.sendUpstream ?? defaultSendUpstream;
   const env = options.env ?? process.env;
+  const db = options.db;
   const diagnosticToken = config.diagnostics.enabled
     ? env[config.diagnostics.tokenEnv]
     : undefined;
@@ -81,6 +92,14 @@ export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
   app.get("/health", async () => ({
     status: "ok",
   }));
+
+  app.get("/.well-known/oauth-protected-resource", async (request, reply) => {
+    const host = request.headers.host ?? request.hostname;
+    return reply.type("application/json").send({
+      resource: `${request.protocol}://${host}`,
+      bearer_methods_supported: ["header"],
+    });
+  });
 
   app.addHook("onClose", async () => {
     await upstreamDispatcher.close();
@@ -148,6 +167,27 @@ export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
     const messagesUpstream = appendSubpath(route.upstream, "/messages");
     const messagesGatewayPath = `${route.path}/messages`;
 
+    const routeAuth: RouteAuthOptions | undefined = db
+      ? {
+          db,
+          requireAuth: config.security.requireAuth,
+          requiredScopes: route.requiredScopes ?? [],
+          toolScopes: route.tools?.toolScopes ?? {},
+        }
+      : undefined;
+
+    // Per-route protected resource metadata (RFC 9728)
+    app.get(
+      `${route.path}/.well-known/oauth-protected-resource`,
+      async (request, reply) => {
+        const host = request.headers.host ?? request.hostname;
+        return reply.type("application/json").send({
+          resource: `${request.protocol}://${host}${route.path}`,
+          bearer_methods_supported: ["header"],
+        });
+      },
+    );
+
     // Streamable HTTP transport
     app.route({
       method: ["GET", "POST", "DELETE"],
@@ -160,6 +200,8 @@ export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
         upstreamDispatcher,
         config,
         acquireStreamSlot,
+        undefined,
+        routeAuth,
       ),
     });
 
@@ -176,6 +218,7 @@ export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
         config,
         acquireStreamSlot,
         messagesGatewayPath,
+        routeAuth,
       ),
     });
 
@@ -191,6 +234,8 @@ export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
         upstreamDispatcher,
         config,
         acquireStreamSlot,
+        undefined,
+        routeAuth,
       ),
     });
   }
@@ -208,8 +253,58 @@ function createProxyHandler(
   acquireStream: () => (() => void) | undefined,
   // When set, rewrites SSE endpoint events to point at this gateway path
   sseEndpointGatewayPath?: string,
+  routeAuth?: RouteAuthOptions,
 ) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
+    // Reject access_token in query string — RFC 6750 §2.3 deprecates URI tokens
+    // because they end up in logs and browser history. We advertise header-only.
+    const incomingQs = new URL(request.raw.url ?? "/", "http://gateway.local")
+      .searchParams;
+    if (incomingQs.has("access_token")) {
+      return reply.code(400).send({
+        error:
+          "Bearer tokens in query strings are not supported; use Authorization header",
+      });
+    }
+
+    // OAuth Bearer token enforcement
+    let tokenScope: string | undefined;
+    if (
+      routeAuth &&
+      (routeAuth.requireAuth || routeAuth.requiredScopes.length > 0)
+    ) {
+      const host = request.headers.host ?? request.hostname;
+      const metadataUrl = `${request.protocol}://${host}${routePath}/.well-known/oauth-protected-resource`;
+      const authHeader = request.headers.authorization;
+      if (!authHeader?.startsWith("Bearer ")) {
+        reply.header(
+          "WWW-Authenticate",
+          `Bearer realm="MCP Gateway", resource_metadata="${metadataUrl}"`,
+        );
+        return reply.code(401).send({ error: "Authorization required" });
+      }
+      const tokenResult = lookupToken(
+        routeAuth.db,
+        authHeader.slice(7),
+        routePath,
+      );
+      if (!tokenResult) {
+        reply.header(
+          "WWW-Authenticate",
+          `Bearer realm="MCP Gateway", error="invalid_token", resource_metadata="${metadataUrl}"`,
+        );
+        return reply.code(401).send({ error: "Invalid or expired token" });
+      }
+      if (!hasScope(tokenResult.scope, routeAuth.requiredScopes)) {
+        reply.header(
+          "WWW-Authenticate",
+          `Bearer realm="MCP Gateway", error="insufficient_scope", scope="${routeAuth.requiredScopes.join(" ")}"`,
+        );
+        return reply.code(403).send({ error: "Insufficient scope" });
+      }
+      tokenScope = tokenResult.scope;
+    }
+
     const body = serializeBody(request.body);
     const jsonBody = parseJson(body);
     const blockedCall = policy.findBlockedCall(jsonBody);
@@ -228,6 +323,27 @@ function createProxyHandler(
           data: { tool: blockedCall.name, reason: blockedCall.reason },
         },
       });
+    }
+
+    // Tool-scope enforcement (only when auth is active and toolScopes configured)
+    if (
+      tokenScope !== undefined &&
+      routeAuth &&
+      Object.keys(routeAuth.toolScopes).length > 0
+    ) {
+      const toolName = extractToolCallName(jsonBody);
+      if (toolName) {
+        const required = routeAuth.toolScopes[toolName] ?? [];
+        if (!hasScope(tokenScope, required)) {
+          reply.header(
+            "WWW-Authenticate",
+            `Bearer realm="MCP Gateway", error="insufficient_scope", scope="${required.join(" ")}"`,
+          );
+          return reply.code(403).send({
+            error: `Insufficient scope for tool '${toolName}'`,
+          });
+        }
+      }
     }
 
     const targetUrl = buildUpstreamUrl(upstreamUrl, request.raw.url);
@@ -357,6 +473,22 @@ function maybeRewriteEndpointEvent(event: string, messagesUrl: string): string {
     }
     return `${prefix}${messagesUrl}${qs}`;
   });
+}
+
+function extractToolCallName(body: unknown): string | undefined {
+  if (
+    !body ||
+    typeof body !== "object" ||
+    (body as Record<string, unknown>).method !== "tools/call"
+  ) {
+    return undefined;
+  }
+  const params = (body as Record<string, unknown>).params;
+  if (!params || typeof params !== "object") {
+    return undefined;
+  }
+  const name = (params as Record<string, unknown>).name;
+  return typeof name === "string" ? name : undefined;
 }
 
 function appendSubpath(base: string, subpath: string): string {
