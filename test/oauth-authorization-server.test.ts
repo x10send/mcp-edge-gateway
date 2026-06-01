@@ -505,6 +505,129 @@ test("OAuth endpoints return protocol errors for malformed request shapes", asyn
   }
 });
 
+test("user denies consent redirects back with error=access_denied and iss", async () => {
+  const ctx = setup();
+  try {
+    await setOAuthUserPassword(ctx.db, "oauth-user-password");
+    const authorize = await ctx.app.inject({
+      method: "GET",
+      url: authorizeUrl(),
+    });
+    const cookie = (authorize.headers["set-cookie"] as string).split(";")[0]!;
+    const csrf = hiddenCsrf(authorize.body);
+    await ctx.app.inject({
+      method: "POST",
+      url: "/oauth/authorize/login",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      payload: `_csrf=${encodeURIComponent(csrf)}&password=oauth-user-password`,
+    });
+    const consent = await ctx.app.inject({
+      method: "POST",
+      url: "/oauth/authorize/consent",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      payload: `_csrf=${encodeURIComponent(csrf)}&decision=deny`,
+    });
+    assert.equal(consent.statusCode, 302);
+    const location = new URL(consent.headers.location as string);
+    assert.equal(location.searchParams.get("error"), "access_denied");
+    assert.equal(location.searchParams.get("iss"), config.oauth.issuer);
+    assert.ok(
+      location.href.startsWith(REDIRECT_URI),
+      "redirect must go to the registered redirect URI",
+    );
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("login returns 401 when no OAuth user password has been set", async () => {
+  const ctx = setup();
+  try {
+    const authorize = await ctx.app.inject({
+      method: "GET",
+      url: authorizeUrl(),
+    });
+    const cookie = (authorize.headers["set-cookie"] as string).split(";")[0]!;
+    const csrf = hiddenCsrf(authorize.body);
+    const login = await ctx.app.inject({
+      method: "POST",
+      url: "/oauth/authorize/login",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      payload: `_csrf=${encodeURIComponent(csrf)}&password=any-password`,
+    });
+    assert.equal(login.statusCode, 401);
+    assert.equal(login.json().error, "access_denied");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("login and consent reject requests with missing transaction cookie", async () => {
+  const ctx = setup();
+  try {
+    const missingLogin = await ctx.app.inject({
+      method: "POST",
+      url: "/oauth/authorize/login",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: "_csrf=anything&password=anything",
+    });
+    assert.equal(missingLogin.statusCode, 400);
+    const missingConsent = await ctx.app.inject({
+      method: "POST",
+      url: "/oauth/authorize/consent",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: "_csrf=anything&decision=approve",
+    });
+    assert.equal(missingConsent.statusCode, 400);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("consent rejects approval on an unauthenticated transaction", async () => {
+  const ctx = setup();
+  try {
+    await setOAuthUserPassword(ctx.db, "oauth-user-password");
+    const authorize = await ctx.app.inject({
+      method: "GET",
+      url: authorizeUrl(),
+    });
+    const cookie = (authorize.headers["set-cookie"] as string).split(";")[0]!;
+    const csrf = hiddenCsrf(authorize.body);
+    const consent = await ctx.app.inject({
+      method: "POST",
+      url: "/oauth/authorize/consent",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      payload: `_csrf=${encodeURIComponent(csrf)}&decision=approve`,
+    });
+    assert.equal(consent.statusCode, 403);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("refresh token rejects wrong resource indicator", async () => {
+  const ctx = setup();
+  try {
+    const tokens = (await exchangeCode(ctx, await issueCode(ctx))).json();
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/oauth/token",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: tokens.refresh_token,
+        client_id: "static-client",
+        resource: "http://localhost:8788/other/mcp",
+      }).toString(),
+    });
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.json().error, "invalid_grant");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
 test("removed static clients do not survive an application restart", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mcp-oauth-static-client-"));
   const store = new StateStore(dir);

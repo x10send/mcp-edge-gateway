@@ -135,4 +135,4 @@ at `/admin/oauth-user`; do not reuse the LAN administration password.
 
 ## Current Status
 
-Phases 0 (security baseline), 1 (reloadable config, SQLite state store, atomic config writes), 2 (local administration — separate admin listener, Argon2id auth, session/CSRF, rate limiting, config editor UI), 3 (OAuth Resource Server — Bearer token enforcement, RFC 9728 metadata, token management UI), and 4 (embedded OAuth Authorization Server — discovery, clients, PKCE authorization codes, refresh rotation, revocation) are complete. See `docs/SECURE_DEPLOYMENT_CHECKLIST.md` for the full exposure-readiness checklist.
+Phases 0–5 are complete. Phase 5 added: full ChatGPT-compatible OAuth flow tests (`test/chatgpt-oauth-flow.test.ts`), protocol-level OAuth regression tests, installation guide (`docs/INSTALLATION.md`), incident-response runbook (`docs/INCIDENT_RESPONSE.md`), release notes with residual risks (`docs/RELEASE_NOTES.md`), and prerelease-safe Docker release CI (skips `latest` tag for prerelease semver). See `docs/SECURE_DEPLOYMENT_CHECKLIST.md` for the full exposure-readiness checklist.

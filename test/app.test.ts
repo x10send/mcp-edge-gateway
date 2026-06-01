@@ -1035,6 +1035,29 @@ test("tool-scope check with prototype-key tool name does not crash (DoS regressi
   cleanup();
 });
 
+test("proxy returns 401 for an expired access token", async () => {
+  const { db, cleanup } = makeDb();
+  const past = Math.floor(Date.now() / 1000) - 1;
+  const { plaintext } = issueToken(db, { expiresAt: past });
+  const authConfig: GatewayConfig = {
+    ...config,
+    security: { ...config.security, requireAuth: true },
+  };
+  const app = buildApp(authConfig, { db });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/unraid/mcp",
+    headers: { host: "localhost", authorization: `Bearer ${plaintext}` },
+  });
+
+  assert.equal(response.statusCode, 401);
+  const wwwAuth = response.headers["www-authenticate"] as string;
+  assert.ok(wwwAuth.includes("invalid_token"));
+  await app.close();
+  cleanup();
+});
+
 test("proxy returns 401 when token is scoped to a different route", async () => {
   const { db, cleanup } = makeDb();
   const { plaintext } = issueToken(db, { routes: ["/other-route"] });
