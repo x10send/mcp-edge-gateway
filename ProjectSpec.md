@@ -530,24 +530,24 @@ If the upstream is unreachable at add-time, the form continues without a
 discovery result and falls back to the existing global deny policy. A
 "Refresh tools" button on the route detail page re-runs discovery at any time.
 
-#### 6.3 Per-Route Tool Whitelist
+#### 6.3 Per-Route Tool Allowlist
 
-Add a `whitelist` enforcement mode to the route tool policy:
+Add an `allowlist` enforcement mode to the route tool policy:
 
-- New `routes[n].tools.whitelist: [...]` field in `gateway.yaml`.
-- When `whitelist` is populated, the gateway enforces a strict allow-list:
+- New `routes[n].tools.allowlist: [...]` field in `gateway.yaml`.
+- When `allowlist` is populated, the gateway enforces a strict allow-list:
   `findBlockedCall` blocks any `tools/call` not on the list, and
-  `filterToolsListPayload` strips non-whitelisted tools from `tools/list`
+  `filterToolsListPayload` strips non-allowlisted tools from `tools/list`
   JSON responses.
-- When `whitelist` is absent, existing allow/deny glob behavior is unchanged.
-- The whitelist and the allow/deny glob lists are independent; deny globs
+- When `allowlist` is absent, existing allow/deny glob behavior is unchanged.
+- The allowlist and the allow/deny glob lists are independent; deny globs
   always win if both apply.
-- The admin UI populates `whitelist` from the tool-discovery checkbox
+- The admin UI populates `allowlist` from the tool-discovery checkbox
   selections and writes it to `gateway.yaml` alongside the route.
 
-Security tests must cover: whitelist blocks unlisted call, whitelist filters
-tools/list, routes without a whitelist still apply deny-glob policy, an empty
-whitelist blocks all tool calls.
+Security tests must cover: allowlist blocks unlisted call, allowlist filters
+tools/list, routes without an allowlist still apply deny-glob policy, an empty
+allowlist blocks all tool calls.
 
 #### 6.4 Per-Route Upstream Auth Credentials
 

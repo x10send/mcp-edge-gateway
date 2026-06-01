@@ -236,7 +236,7 @@ export type AuditEventType =
   | "oauth_user_password_changed"
   | "route_added"
   | "route_deleted"
-  | "route_whitelist_saved";
+  | "route_allowlist_saved";
 
 export function appendAuditEvent(
   db: DatabaseSync,

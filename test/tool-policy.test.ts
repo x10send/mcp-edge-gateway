@@ -56,10 +56,10 @@ test("tools/list payloads omit denied tools", () => {
   );
 });
 
-test("whitelist blocks tools not on the list", () => {
+test("allowlist blocks tools not on the list", () => {
   const policy = new ToolPolicy(
     { defaultDenyDangerousTools: false },
-    { whitelist: ["get_status", "list_items"] },
+    { allowlist: ["get_status", "list_items"] },
   );
 
   assert.equal(policy.evaluate("get_status").allowed, true);
@@ -67,14 +67,14 @@ test("whitelist blocks tools not on the list", () => {
   assert.equal(policy.evaluate("other_tool").allowed, false);
   assert.deepEqual(policy.evaluate("other_tool"), {
     allowed: false,
-    reason: "tool is not on the route whitelist",
+    reason: "tool is not on the route allowlist",
   });
 });
 
-test("whitelist blocks tools/call for unlisted tools", () => {
+test("allowlist blocks tools/call for unlisted tools", () => {
   const policy = new ToolPolicy(
     { defaultDenyDangerousTools: false },
-    { whitelist: ["get_status"] },
+    { allowlist: ["get_status"] },
   );
 
   const blocked = policy.findBlockedCall({
@@ -85,7 +85,7 @@ test("whitelist blocks tools/call for unlisted tools", () => {
   });
   assert.ok(blocked);
   assert.equal(blocked.name, "other_tool");
-  assert.equal(blocked.reason, "tool is not on the route whitelist");
+  assert.equal(blocked.reason, "tool is not on the route allowlist");
 
   assert.equal(
     policy.findBlockedCall({
@@ -98,10 +98,10 @@ test("whitelist blocks tools/call for unlisted tools", () => {
   );
 });
 
-test("whitelist filters tools/list JSON responses", () => {
+test("allowlist filters tools/list JSON responses", () => {
   const policy = new ToolPolicy(
     { defaultDenyDangerousTools: false },
-    { whitelist: ["get_status"] },
+    { allowlist: ["get_status"] },
   );
 
   assert.deepEqual(
@@ -124,15 +124,15 @@ test("whitelist filters tools/list JSON responses", () => {
   );
 });
 
-test("deny rules still apply when whitelist is set", () => {
+test("deny rules still apply when allowlist is set", () => {
   const policy = new ToolPolicy(
     { defaultDenyDangerousTools: true },
-    { whitelist: ["get_status", "run_exec"] },
+    { allowlist: ["get_status", "run_exec"] },
   );
 
-  // get_status passes both whitelist and deny check
+  // get_status passes both allowlist and deny check
   assert.equal(policy.evaluate("get_status").allowed, true);
-  // run_exec is on whitelist but matches dangerous denylist
+  // run_exec is on allowlist but matches dangerous denylist
   assert.equal(policy.evaluate("run_exec").allowed, false);
   assert.equal(
     policy.evaluate("run_exec").reason,
@@ -140,15 +140,15 @@ test("deny rules still apply when whitelist is set", () => {
   );
 });
 
-test("empty whitelist blocks all tool calls", () => {
+test("empty allowlist blocks all tool calls", () => {
   const policy = new ToolPolicy(
     { defaultDenyDangerousTools: false },
-    { whitelist: [] },
+    { allowlist: [] },
   );
 
   assert.equal(policy.evaluate("any_tool").allowed, false);
   assert.equal(
     policy.evaluate("any_tool").reason,
-    "tool is not on the route whitelist",
+    "tool is not on the route allowlist",
   );
 });

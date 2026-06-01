@@ -983,7 +983,7 @@ test("POST /admin/routes/:path/delete rejects deleting the last route", async ()
   }
 });
 
-test("GET /admin/routes/:path/tools shows tool whitelist page", async () => {
+test("GET /admin/routes/:path/tools shows tool allowlist page", async () => {
   const ctx = setupTest();
   try {
     const { cookie, csrfToken } = await doSetup(ctx);
@@ -1015,7 +1015,7 @@ test("GET /admin/routes/:path/tools shows tool whitelist page", async () => {
   }
 });
 
-test("POST /admin/routes/:path/tools saves whitelist to gateway.yaml", async () => {
+test("POST /admin/routes/:path/tools saves allowlist to gateway.yaml", async () => {
   const ctx = setupTest();
   try {
     const { cookie, csrfToken } = await doSetup(ctx);
@@ -1029,7 +1029,7 @@ test("POST /admin/routes/:path/tools saves whitelist to gateway.yaml", async () 
     const written = readFileSync(ctx.configPath, "utf8");
     assert.ok(written.includes("get_status"));
     assert.ok(written.includes("list_containers"));
-    assert.ok(written.includes("whitelist"));
+    assert.ok(written.includes("allowlist"));
   } finally {
     await ctx.cleanup();
   }

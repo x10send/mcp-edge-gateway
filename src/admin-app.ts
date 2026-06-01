@@ -679,11 +679,11 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
     const rows = config.routes
       .map((r) => {
         const cachedTools = getCachedTools(db, r.path);
-        const whitelistCount = r.tools?.whitelist?.length ?? 0;
+        const allowlistCount = r.tools?.allowlist?.length ?? 0;
         return `<tr>
           <td><code>${escapeHtml(r.path)}</code></td>
           <td><code>${escapeHtml(r.upstream)}</code></td>
-          <td>${cachedTools.length > 0 ? `${whitelistCount > 0 ? whitelistCount + " whitelisted / " : ""}${cachedTools.length} discovered` : "Not discovered"}</td>
+          <td>${cachedTools.length > 0 ? `${allowlistCount > 0 ? allowlistCount + " allowlisted / " : ""}${cachedTools.length} discovered` : "Not discovered"}</td>
           <td>
             <a href="/admin/routes${encodeURIComponent(r.path)}/tools">Manage tools</a>
             &nbsp;
@@ -879,7 +879,7 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
     return reply.redirect("/admin/routes");
   });
 
-  // Tool whitelist management — list discovered tools with checkboxes
+  // Tool allowlist management — list discovered tools with checkboxes
   app.get("/admin/routes:encodedPath/tools", async (request, reply) => {
     const sessionToken = await requireAuth(request, reply);
     if (!sessionToken) return;
@@ -902,7 +902,7 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
     }
 
     const cachedTools = getCachedTools(db, routePath);
-    const currentWhitelist = new Set(route.tools?.whitelist ?? []);
+    const currentAllowlist = new Set(route.tools?.allowlist ?? []);
     const DANGEROUS = new Set([
       "shell",
       "exec",
@@ -927,8 +927,8 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
         .map((t) => {
           const dangerous = isDangerous(t.name);
           const checked =
-            currentWhitelist.size > 0
-              ? currentWhitelist.has(t.name)
+            currentAllowlist.size > 0
+              ? currentAllowlist.has(t.name)
               : !dangerous;
           return `<tr>
             <td><input type="checkbox" name="tool" value="${escapeHtml(t.name)}"${checked ? " checked" : ""}></td>
@@ -942,7 +942,7 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
     return reply.type("text/html").send(
       htmlPage(
         `Tools: ${routePath}`,
-        `<h2>Tool Whitelist: <code>${escapeHtml(routePath)}</code></h2>
+        `<h2>Tool Allowlist: <code>${escapeHtml(routePath)}</code></h2>
         <nav>${navLinks(session.csrfToken)}</nav>
         <p>Checked tools are allowed; unchecked tools are blocked. If no tools are discovered, the global deny policy applies.</p>
         <form method="POST" action="/admin/routes${encodeURIComponent(routePath)}/discover" style="display:inline">
@@ -959,7 +959,7 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
               <thead><tr><th>Allow</th><th>Tool</th><th>Description</th></tr></thead>
               <tbody>${toolRows}</tbody>
             </table><br>
-            <button type="submit">Save whitelist</button>
+            <button type="submit">Save allowlist</button>
             &nbsp;
             <a href="/admin/routes">Cancel</a>
           </form>`
@@ -968,7 +968,7 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
     );
   });
 
-  // Save tool whitelist
+  // Save tool allowlist
   app.post("/admin/routes:encodedPath/tools", async (request, reply) => {
     const sessionToken = await requireAuth(request, reply);
     if (!sessionToken) return;
@@ -980,7 +980,7 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
 
     const body = request.body as Record<string, string | string[]>;
     const selected = body.tool;
-    const whitelist = Array.isArray(selected)
+    const allowlist = Array.isArray(selected)
       ? selected
       : typeof selected === "string"
         ? [selected]
@@ -988,7 +988,7 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
 
     let newYaml: string;
     try {
-      newYaml = setRouteWhitelistInYaml(configPath, routePath, whitelist);
+      newYaml = setRouteAllowlistInYaml(configPath, routePath, allowlist);
     } catch (error) {
       return reply
         .code(400)
@@ -1015,18 +1015,18 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
         );
     }
 
-    appendAuditEvent(db, "route_whitelist_saved", clientIp(request), {
+    appendAuditEvent(db, "route_allowlist_saved", clientIp(request), {
       path: routePath,
-      count: whitelist.length,
+      count: allowlist.length,
     });
     options.onConfigSaved?.();
 
     return reply.type("text/html").send(
       htmlPage(
-        "Whitelist Saved",
-        `<h2>Whitelist Saved</h2>
-        <p>${whitelist.length} tool(s) whitelisted for <code>${escapeHtml(routePath)}</code>.</p>
-        <p><strong>Restart required</strong> to apply the whitelist.</p>
+        "Allowlist Saved",
+        `<h2>Allowlist Saved</h2>
+        <p>${allowlist.length} tool(s) allowlisted for <code>${escapeHtml(routePath)}</code>.</p>
+        <p><strong>Restart required</strong> to apply the allowlist.</p>
         <a href="/admin/routes">← Back to routes</a>`,
       ),
     );
@@ -1156,10 +1156,10 @@ function removeRouteFromYaml(configPath: string, routePath: string): string {
   return yamlStringify(doc, { lineWidth: 0 });
 }
 
-function setRouteWhitelistInYaml(
+function setRouteAllowlistInYaml(
   configPath: string,
   routePath: string,
-  whitelist: string[],
+  allowlist: string[],
 ): string {
   const doc = readParsedYaml(configPath);
   if (!Array.isArray(doc.routes)) {
@@ -1179,10 +1179,10 @@ function setRouteWhitelistInYaml(
         ? { ...(route.tools as Record<string, unknown>) }
         : {}
     ) as Record<string, unknown>;
-    if (whitelist.length > 0) {
-      tools.whitelist = whitelist;
+    if (allowlist.length > 0) {
+      tools.allowlist = allowlist;
     } else {
-      delete tools.whitelist;
+      delete tools.allowlist;
     }
     return {
       ...route,

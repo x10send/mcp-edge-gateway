@@ -8,7 +8,7 @@ export interface ToolPolicyConfig {
   deny?: string[];
   defaultDenyDangerousTools?: boolean;
   toolScopes?: Record<string, string[]>; // tool name → required OAuth scopes
-  whitelist?: string[]; // strict per-route allow-list; blocks everything not listed
+  allowlist?: string[]; // strict per-route allow-list; blocks everything not listed
 }
 
 export type UpstreamAuthType = "bearer" | "header";
@@ -525,7 +525,7 @@ function parseToolPolicy(value: unknown, field: string): ToolPolicyConfig {
       `${field}.defaultDenyDangerousTools`,
     ),
     toolScopes: readScopeRecord(value.toolScopes, `${field}.toolScopes`),
-    whitelist: readStringArray(value.whitelist, `${field}.whitelist`),
+    allowlist: readStringArray(value.allowlist, `${field}.allowlist`),
   };
 }
 

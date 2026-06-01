@@ -488,17 +488,17 @@ routes:
   );
 });
 
-test("loadConfig accepts route-level tool whitelist", () => {
+test("loadConfig accepts route-level tool allowlist", () => {
   const config = loadYaml(`
 routes:
   - path: /unraid
     upstream: http://unraid-agent.local:8043
     tools:
-      whitelist:
+      allowlist:
         - get_status
         - list_containers
 `);
-  assert.deepEqual(config.routes[0]?.tools?.whitelist, [
+  assert.deepEqual(config.routes[0]?.tools?.allowlist, [
     "get_status",
     "list_containers",
   ]);

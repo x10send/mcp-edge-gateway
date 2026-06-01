@@ -30,7 +30,7 @@ export interface BlockedToolCall {
 export class ToolPolicy {
   private readonly allowPatterns: RegExp[];
   private readonly denyPatterns: RegExp[];
-  private readonly whitelist: Set<string> | undefined;
+  private readonly allowlist: Set<string> | undefined;
 
   constructor(
     globalPolicy: ToolPolicyConfig,
@@ -52,16 +52,16 @@ export class ToolPolicy {
       ...(routePolicy.deny ?? []),
     ].map(toPattern);
 
-    this.whitelist =
-      routePolicy.whitelist !== undefined
-        ? new Set(routePolicy.whitelist)
+    this.allowlist =
+      routePolicy.allowlist !== undefined
+        ? new Set(routePolicy.allowlist)
         : undefined;
   }
 
   evaluate(name: string): { allowed: boolean; reason?: string } {
     // Whitelist is checked first: if set, only listed tools pass
-    if (this.whitelist !== undefined && !this.whitelist.has(name)) {
-      return { allowed: false, reason: "tool is not on the route whitelist" };
+    if (this.allowlist !== undefined && !this.allowlist.has(name)) {
+      return { allowed: false, reason: "tool is not on the route allowlist" };
     }
     if (this.denyPatterns.some((pattern) => pattern.test(name))) {
       return { allowed: false, reason: "tool name matched the denylist" };
