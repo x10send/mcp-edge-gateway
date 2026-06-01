@@ -232,7 +232,8 @@ export type AuditEventType =
   | "config_saved"
   | "config_preview"
   | "token_issued"
-  | "token_revoked";
+  | "token_revoked"
+  | "oauth_user_password_changed";
 
 export function appendAuditEvent(
   db: DatabaseSync,

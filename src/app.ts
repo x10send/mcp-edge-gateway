@@ -2,9 +2,15 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import type { DatabaseSync } from "node:sqlite";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
+import fastifyCookie from "@fastify/cookie";
+import fastifyFormbody from "@fastify/formbody";
 import { request as defaultSendUpstream, type Dispatcher } from "undici";
 import type { GatewayConfig } from "./config.js";
 import { hasScope, lookupToken } from "./oauth-token-store.js";
+import {
+  registerOAuthAuthorizationServer,
+  type RegisterOAuthOptions,
+} from "./oauth-authorization-server.js";
 import { ToolPolicy } from "./tool-policy.js";
 import { createUpstreamDispatcher } from "./upstream-dispatcher.js";
 
@@ -38,6 +44,11 @@ export const LOGGER_REDACT_PATHS = [
   "req.headers.authorization",
   "req.headers.cookie",
   "req.headers.proxy-authorization",
+  "req.body.code",
+  "req.body.code_verifier",
+  "req.body.password",
+  "req.body.refresh_token",
+  "req.body.token",
   "res.headers.set-cookie",
 ];
 
@@ -52,6 +63,7 @@ export interface BuildAppOptions {
   sendUpstream?: typeof defaultSendUpstream;
   env?: NodeJS.ProcessEnv;
   db?: DatabaseSync;
+  oauth?: RegisterOAuthOptions;
 }
 
 export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
@@ -89,6 +101,7 @@ export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
   // Fail fast if auth is required by config but no database was provided.
   // Without a db, routeAuth is undefined and auth checks are silently skipped.
   const authRequired =
+    config.oauth.enabled ||
     config.security.requireAuth ||
     config.routes.some((r) => r.requiredScopes && r.requiredScopes.length > 0);
   if (authRequired && !db) {
@@ -115,6 +128,16 @@ export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
         ? config.security.trustedProxies
         : false,
   });
+  if (config.oauth.enabled) {
+    void app.register(fastifyCookie);
+    void app.register(fastifyFormbody);
+    registerOAuthAuthorizationServer(
+      app,
+      config,
+      db as DatabaseSync,
+      options.oauth,
+    );
+  }
 
   app.get("/health", async () => ({
     status: "ok",
@@ -124,6 +147,9 @@ export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
     return reply.type("application/json").send({
       resource: config.security.publicOrigin,
       bearer_methods_supported: ["header"],
+      ...(config.oauth.enabled
+        ? { authorization_servers: [config.oauth.issuer] }
+        : {}),
     });
   });
 
@@ -209,6 +235,9 @@ export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
       return reply.type("application/json").send({
         resource: protectedResource,
         bearer_methods_supported: ["header"],
+        ...(config.oauth.enabled
+          ? { authorization_servers: [config.oauth.issuer] }
+          : {}),
       });
     });
 

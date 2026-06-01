@@ -74,6 +74,91 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX oauth_tokens_hash_idx ON oauth_tokens(token_hash);
     `,
   },
+  {
+    name: "004_oauth_authorization_server",
+    sql: `
+      ALTER TABLE oauth_tokens ADD COLUMN refresh_family_id TEXT;
+      CREATE INDEX oauth_tokens_refresh_family_idx
+        ON oauth_tokens(refresh_family_id);
+
+      CREATE TABLE oauth_user_credentials (
+        id            INTEGER PRIMARY KEY CHECK (id = 1),
+        password_hash TEXT    NOT NULL,
+        updated_at    INTEGER NOT NULL DEFAULT (unixepoch())
+      );
+
+      CREATE TABLE oauth_clients (
+        client_id                  TEXT PRIMARY KEY,
+        client_name                TEXT NOT NULL,
+        redirect_uris              TEXT NOT NULL,
+        token_endpoint_auth_method TEXT NOT NULL DEFAULT 'none',
+        source                     TEXT NOT NULL,
+        created_at                 INTEGER NOT NULL DEFAULT (unixepoch())
+      );
+
+      CREATE TABLE oauth_registration_attempts (
+        id         INTEGER PRIMARY KEY,
+        ip_address TEXT    NOT NULL,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch())
+      );
+      CREATE INDEX oauth_registration_attempts_ip_idx
+        ON oauth_registration_attempts(ip_address, created_at);
+
+      CREATE TABLE oauth_login_attempts (
+        id         INTEGER PRIMARY KEY,
+        ip_address TEXT    NOT NULL,
+        succeeded  INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch())
+      );
+      CREATE INDEX oauth_login_attempts_ip_idx
+        ON oauth_login_attempts(ip_address, created_at);
+
+      CREATE TABLE oauth_authorization_transactions (
+        id                    INTEGER PRIMARY KEY,
+        token_hash            TEXT    NOT NULL UNIQUE,
+        csrf_token            TEXT    NOT NULL,
+        client_id             TEXT    NOT NULL,
+        redirect_uri          TEXT    NOT NULL,
+        resource              TEXT    NOT NULL,
+        scope                 TEXT    NOT NULL,
+        state                 TEXT,
+        code_challenge        TEXT    NOT NULL,
+        code_challenge_method TEXT    NOT NULL,
+        authenticated         INTEGER NOT NULL DEFAULT 0,
+        expires_at            INTEGER NOT NULL,
+        created_at            INTEGER NOT NULL DEFAULT (unixepoch())
+      );
+
+      CREATE TABLE oauth_authorization_codes (
+        id                    INTEGER PRIMARY KEY,
+        code_hash             TEXT    NOT NULL UNIQUE,
+        client_id             TEXT    NOT NULL,
+        redirect_uri          TEXT    NOT NULL,
+        resource              TEXT    NOT NULL,
+        scope                 TEXT    NOT NULL,
+        code_challenge        TEXT    NOT NULL,
+        code_challenge_method TEXT    NOT NULL,
+        expires_at            INTEGER NOT NULL,
+        consumed_at           INTEGER,
+        created_at            INTEGER NOT NULL DEFAULT (unixepoch())
+      );
+
+      CREATE TABLE oauth_refresh_tokens (
+        id          INTEGER PRIMARY KEY,
+        token_hash  TEXT    NOT NULL UNIQUE,
+        family_id   TEXT    NOT NULL,
+        client_id   TEXT    NOT NULL,
+        resource    TEXT    NOT NULL,
+        scope       TEXT    NOT NULL,
+        expires_at  INTEGER NOT NULL,
+        consumed_at INTEGER,
+        revoked_at  INTEGER,
+        created_at  INTEGER NOT NULL DEFAULT (unixepoch())
+      );
+      CREATE INDEX oauth_refresh_tokens_family_idx
+        ON oauth_refresh_tokens(family_id);
+    `,
+  },
 ];
 
 export class StateStore {

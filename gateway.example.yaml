@@ -23,6 +23,21 @@ diagnostics:
   enabled: false
   tokenEnv: GATEWAY_DIAGNOSTICS_TOKEN
 
+oauth:
+  # Enable only after publicOrigin and issuer are set to the reviewed external
+  # HTTPS origin and an OAuth resource-owner password is configured in admin.
+  enabled: false
+  issuer: https://localhost
+  insecureAllowHttpIssuer: false
+  accessTokenTtlSeconds: 900
+  refreshTokenTtlSeconds: 2592000
+  authorizationCodeTtlSeconds: 300
+  authorizationTransactionTtlSeconds: 600
+  dynamicRegistrationLimitPerHour: 20
+  loginLimitPerHour: 10
+  loginLockoutSeconds: 900
+  staticClients: []
+
 security:
   # Canonical externally visible origin. Use an explicit https:// origin before
   # external exposure. OAuth metadata never derives this value from Host headers.

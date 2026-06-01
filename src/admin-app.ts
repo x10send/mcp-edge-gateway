@@ -31,6 +31,7 @@ import {
   revokeToken,
   tokenStatus,
 } from "./oauth-token-store.js";
+import { setOAuthUserPassword } from "./oauth-authorization-server.js";
 
 const COOKIE_NAME = "mcp_admin_session";
 const CSRF_FIELD = "_csrf";
@@ -616,6 +617,55 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
     return reply.redirect("/admin/tokens");
   });
 
+  app.get("/admin/oauth-user", async (request, reply) => {
+    const sessionToken = await requireAuth(request, reply);
+    if (!sessionToken) return;
+    const session = lookupSession(db, sessionToken)!;
+    return reply.type("text/html").send(
+      htmlPage(
+        "OAuth User",
+        `<h2>OAuth Resource-Owner Password</h2>
+        <nav>${navLinks(session.csrfToken)}</nav>
+        <p>This credential is separate from the LAN administration password.</p>
+        <form method="POST" action="/admin/oauth-user">
+          <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(session.csrfToken)}">
+          <label>New password<br><input type="password" name="password" required minlength="12"></label><br><br>
+          <label>Confirm password<br><input type="password" name="confirm" required minlength="12"></label><br><br>
+          <button type="submit">Set OAuth password</button>
+        </form>`,
+      ),
+    );
+  });
+
+  app.post("/admin/oauth-user", async (request, reply) => {
+    const sessionToken = await requireAuth(request, reply);
+    if (!sessionToken) return;
+    if (!requireCsrf(request, reply, sessionToken)) return;
+    const body = request.body as Record<string, string | undefined>;
+    if (
+      !body.password ||
+      body.password.length < 12 ||
+      body.password !== body.confirm
+    ) {
+      return reply
+        .code(400)
+        .type("text/html")
+        .send(
+          htmlPage(
+            "OAuth User",
+            "<p>Password must match and contain at least 12 characters.</p>",
+          ),
+        );
+    }
+    await setOAuthUserPassword(db, body.password);
+    appendAuditEvent(db, "oauth_user_password_changed", clientIp(request));
+    return reply
+      .type("text/html")
+      .send(
+        htmlPage("OAuth User", "<p>OAuth resource-owner password updated.</p>"),
+      );
+  });
+
   // ── Health (internal liveness) ────────────────────────────────────────────
 
   app.get("/admin/health", async () => ({ status: "ok" }));
@@ -676,6 +726,7 @@ function navLinks(csrfToken: string): string {
   return `<a href="/admin/dashboard">Dashboard</a>
           <a href="/admin/config">Edit Config</a>
           <a href="/admin/tokens">Tokens</a>
+          <a href="/admin/oauth-user">OAuth User</a>
           <form method="POST" action="/admin/logout" style="display:inline">
             <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(csrfToken)}">
             <button type="submit">Log out</button>

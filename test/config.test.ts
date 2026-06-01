@@ -337,6 +337,84 @@ routes:
   );
 });
 
+test("loadConfig validates OAuth issuer and static public clients", () => {
+  const config = loadYaml(`
+oauth:
+  enabled: true
+  issuer: https://mcp.example.com
+  staticClients:
+    - clientId: known-client
+      clientName: Known Client
+      redirectUris:
+        - https://client.example/callback
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+`);
+  assert.equal(config.oauth.issuer, "https://mcp.example.com");
+  assert.equal(config.oauth.staticClients[0]?.clientId, "known-client");
+
+  assert.throws(
+    () =>
+      loadYaml(`
+oauth:
+  enabled: true
+  issuer: http://mcp.example.com
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+`),
+    /insecureAllowHttpIssuer/,
+  );
+  assert.throws(
+    () =>
+      loadYaml(`
+oauth:
+  staticClients:
+    - clientId: bad-client
+      clientName: Bad Client
+      redirectUris:
+        - http://attacker.example/callback
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+`),
+    /HTTPS or HTTP loopback/,
+  );
+  assert.throws(
+    () =>
+      loadYaml(`
+oauth:
+  staticClients:
+    - clientId: bad-client
+      clientName: Bad Client
+      redirectUris:
+        - https://user@client.example/callback
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+`),
+    /without credentials or fragments/,
+  );
+  assert.throws(
+    () =>
+      loadYaml(`
+oauth:
+  staticClients:
+    - clientId: duplicate-client
+      clientName: First
+      redirectUris: [https://client.example/callback]
+    - clientId: duplicate-client
+      clientName: Second
+      redirectUris: [https://client.example/other]
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+`),
+    /Duplicate OAuth static client ID/,
+  );
+});
+
 test("loadConfig accepts route-level requiredScopes", () => {
   const config = loadYaml(`
 routes:

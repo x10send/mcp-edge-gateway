@@ -8,6 +8,7 @@ import { buildApp } from "../src/app.js";
 import { StateStore, MIGRATIONS } from "../src/state.js";
 import { consumeBootstrap, initBootstrap } from "../src/admin-auth.js";
 import { issueToken } from "../src/oauth-token-store.js";
+import { verifyOAuthUserPassword } from "../src/oauth-authorization-server.js";
 import type { GatewayConfig } from "../src/config.js";
 
 const VALID_YAML = `
@@ -23,6 +24,19 @@ routes:
 const BASE_CONFIG: GatewayConfig = {
   server: { host: "127.0.0.1", port: 8788, logLevel: "silent" },
   diagnostics: { enabled: false, tokenEnv: "GATEWAY_DIAGNOSTICS_TOKEN" },
+  oauth: {
+    enabled: false,
+    issuer: "https://localhost",
+    insecureAllowHttpIssuer: false,
+    accessTokenTtlSeconds: 900,
+    refreshTokenTtlSeconds: 2_592_000,
+    authorizationCodeTtlSeconds: 300,
+    authorizationTransactionTtlSeconds: 600,
+    dynamicRegistrationLimitPerHour: 20,
+    loginLimitPerHour: 10,
+    loginLockoutSeconds: 900,
+    staticClients: [],
+  },
   admin: {
     enabled: true,
     port: 8789,
@@ -857,6 +871,33 @@ test("POST /admin/tokens/:id/revoke requires CSRF token", async () => {
       },
     });
     assert.equal(res.statusCode, 403);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("POST /admin/oauth-user stores a separate OAuth password", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie, csrfToken } = await doSetup(ctx);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/oauth-user",
+      headers: {
+        cookie,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      payload: `_csrf=${encodeURIComponent(csrfToken)}&password=oauth-user-password&confirm=oauth-user-password`,
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(
+      await verifyOAuthUserPassword(ctx.db, "oauth-user-password"),
+      true,
+    );
+    assert.equal(
+      await verifyOAuthUserPassword(ctx.db, "correct-horse-battery-staple"),
+      false,
+    );
   } finally {
     await ctx.cleanup();
   }

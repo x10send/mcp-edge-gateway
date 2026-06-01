@@ -23,19 +23,20 @@ POST/DELETE     /unraid/messages -> http://unraid-agent.local:8043/messages
 - JSON `tools/list` filtering and server-side blocking of denied `tools/call`
 - Health endpoint at `/health`
 
-OAuth is not included in this first release. Add it before exposing sensitive
-backends to untrusted clients.
+The current `main` branch includes an embedded OAuth authorization server for
+Phase 4 development and testing. External exposure remains blocked until Phase
+5 protocol integration, deployment validation, and release review are complete.
 
 > **Security warning:** `v0.1.0` is a LAN-only development baseline. Do not
 > expose MCP routes through Cloudflare Tunnel until the OAuth and security
 > phases in [`ProjectSpec.md`](./ProjectSpec.md) are complete.
 
-The next milestone adds ChatGPT-compatible OAuth and an optional configuration
-web page on a separate LAN-only administration listener. The administration
+The gateway includes ChatGPT-compatible OAuth and an optional configuration web
+page on a separate LAN-only administration listener. The administration
 listener must not be forwarded through Cloudflare Tunnel. See
 [`ProjectSpec.md`](./ProjectSpec.md) for the planned security boundaries.
-OAuth tokens, passwords, and client secrets will be stored separately from
-`gateway.yaml`; public examples will never include deployment credentials.
+OAuth tokens and passwords are stored separately from `gateway.yaml`; public
+examples never include deployment credentials.
 Admin session cookies are secure by default. Put the LAN-only admin listener
 behind HTTPS, or explicitly enable `admin.insecureAllowHttpCookies` only for an
 isolated direct-HTTP LAN setup.
@@ -54,6 +55,11 @@ server:
 diagnostics:
   enabled: false
   tokenEnv: GATEWAY_DIAGNOSTICS_TOKEN
+
+oauth:
+  enabled: false
+  issuer: https://localhost
+  insecureAllowHttpIssuer: false
 
 security:
   publicOrigin: http://localhost:8788
@@ -93,6 +99,12 @@ true`, and remove `insecureAllowHttpPublicOrigin` and
 `insecureAllowUnauthenticatedMcp`.
 Optional `/diagnostics` output is disabled unless configured with a local
 `GATEWAY_DIAGNOSTICS_TOKEN` containing at least 32 characters.
+
+When OAuth is enabled, the public listener serves authorization-server metadata,
+PKCE authorization-code login and consent, token refresh, revocation, dynamic
+client registration, and Client ID Metadata Document discovery. Configure the
+separate OAuth resource-owner password from the LAN-only admin page before
+connecting a remote client.
 
 ## Local Development
 

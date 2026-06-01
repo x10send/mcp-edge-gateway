@@ -51,6 +51,26 @@ export interface AdminConfig {
   loginLockoutSeconds: number;
 }
 
+export interface OAuthStaticClientConfig {
+  clientId: string;
+  clientName: string;
+  redirectUris: string[];
+}
+
+export interface OAuthConfig {
+  enabled: boolean;
+  issuer: string;
+  insecureAllowHttpIssuer: boolean;
+  accessTokenTtlSeconds: number;
+  refreshTokenTtlSeconds: number;
+  authorizationCodeTtlSeconds: number;
+  authorizationTransactionTtlSeconds: number;
+  dynamicRegistrationLimitPerHour: number;
+  loginLimitPerHour: number;
+  loginLockoutSeconds: number;
+  staticClients: OAuthStaticClientConfig[];
+}
+
 export interface GatewayConfig {
   server: {
     host: string;
@@ -58,6 +78,7 @@ export interface GatewayConfig {
     logLevel: string;
   };
   diagnostics: DiagnosticsConfig;
+  oauth: OAuthConfig;
   admin: AdminConfig;
   security: SecurityConfig;
   tools: ToolPolicyConfig;
@@ -78,6 +99,7 @@ export function loadConfig(
 
   const server = isRecord(rawConfig.server) ? rawConfig.server : {};
   const diagnostics = parseDiagnostics(rawConfig.diagnostics);
+  const oauth = parseOAuth(rawConfig.oauth);
   const admin = parseAdmin(rawConfig.admin);
   const security = parseSecurity(rawConfig.security);
   const tools = parseToolPolicy(rawConfig.tools, "tools");
@@ -90,11 +112,106 @@ export function loadConfig(
       logLevel: readString(server.logLevel, "server.logLevel", "info"),
     },
     diagnostics,
+    oauth,
     admin,
     security,
     tools,
     routes,
   };
+}
+
+function parseOAuth(value: unknown): OAuthConfig {
+  if (value !== undefined && !isRecord(value)) {
+    throw new Error("oauth must be an object");
+  }
+  const oauth = value ?? {};
+  const issuer = parsePublicOrigin(
+    readString(oauth.issuer, "oauth.issuer", "https://localhost"),
+  );
+  const insecureAllowHttpIssuer = readBoolean(
+    oauth.insecureAllowHttpIssuer,
+    "oauth.insecureAllowHttpIssuer",
+    false,
+  ) as boolean;
+  if (issuer.startsWith("http:") && !insecureAllowHttpIssuer) {
+    throw new Error(
+      "HTTP oauth.issuer requires oauth.insecureAllowHttpIssuer to be explicitly true",
+    );
+  }
+
+  return {
+    enabled: readBoolean(oauth.enabled, "oauth.enabled", false) as boolean,
+    issuer,
+    insecureAllowHttpIssuer,
+    accessTokenTtlSeconds: readPositiveInteger(
+      oauth.accessTokenTtlSeconds,
+      "oauth.accessTokenTtlSeconds",
+      900,
+    ),
+    refreshTokenTtlSeconds: readPositiveInteger(
+      oauth.refreshTokenTtlSeconds,
+      "oauth.refreshTokenTtlSeconds",
+      2_592_000,
+    ),
+    authorizationCodeTtlSeconds: readPositiveInteger(
+      oauth.authorizationCodeTtlSeconds,
+      "oauth.authorizationCodeTtlSeconds",
+      300,
+    ),
+    authorizationTransactionTtlSeconds: readPositiveInteger(
+      oauth.authorizationTransactionTtlSeconds,
+      "oauth.authorizationTransactionTtlSeconds",
+      600,
+    ),
+    dynamicRegistrationLimitPerHour: readPositiveInteger(
+      oauth.dynamicRegistrationLimitPerHour,
+      "oauth.dynamicRegistrationLimitPerHour",
+      20,
+    ),
+    loginLimitPerHour: readPositiveInteger(
+      oauth.loginLimitPerHour,
+      "oauth.loginLimitPerHour",
+      10,
+    ),
+    loginLockoutSeconds: readPositiveInteger(
+      oauth.loginLockoutSeconds,
+      "oauth.loginLockoutSeconds",
+      900,
+    ),
+    staticClients: parseStaticClients(oauth.staticClients),
+  };
+}
+
+function parseStaticClients(value: unknown): OAuthStaticClientConfig[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new Error("oauth.staticClients must be an array");
+  }
+  const seenClientIds = new Set<string>();
+  return value.map((client, index) => {
+    if (!isRecord(client)) {
+      throw new Error(`oauth.staticClients[${index}] must be an object`);
+    }
+    const clientId = readString(
+      client.clientId,
+      `oauth.staticClients[${index}].clientId`,
+    );
+    if (seenClientIds.has(clientId)) {
+      throw new Error(`Duplicate OAuth static client ID: ${clientId}`);
+    }
+    seenClientIds.add(clientId);
+    return {
+      clientId,
+      clientName: readString(
+        client.clientName,
+        `oauth.staticClients[${index}].clientName`,
+      ),
+      redirectUris: readRedirectUris(
+        client.redirectUris,
+        `oauth.staticClients[${index}].redirectUris`,
+      ),
+    };
+  });
 }
 
 function parseRoutes(value: unknown, security: SecurityConfig): RouteConfig[] {
@@ -466,6 +583,36 @@ function readScopeArray(value: unknown, field: string): string[] | undefined {
   const scopes = readStringArray(value, field);
   scopes?.forEach((scope) => validateScope(scope, field));
   return scopes;
+}
+
+function readRedirectUris(value: unknown, field: string): string[] {
+  const uris = readStringArray(value, field);
+  if (!uris || uris.length === 0) {
+    throw new Error(`${field} must contain at least one redirect URI`);
+  }
+  uris.forEach((uri) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(uri);
+    } catch {
+      throw new Error(`${field} contains an invalid redirect URI`);
+    }
+    if (
+      parsed.username ||
+      parsed.password ||
+      parsed.hash ||
+      (parsed.protocol !== "https:" &&
+        !(
+          parsed.protocol === "http:" &&
+          ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname)
+        ))
+    ) {
+      throw new Error(
+        `${field} redirect URIs must use HTTPS or HTTP loopback without credentials or fragments`,
+      );
+    }
+  });
+  return uris;
 }
 
 function readScopeRecord(

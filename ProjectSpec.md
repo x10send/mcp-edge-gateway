@@ -322,11 +322,10 @@ one-time setup credential and must not create a default password.
 
 The `v0.1.0` image is a development baseline and must not be exposed to
 untrusted clients. Phase 0 runtime and active CI hardening and Phases 1 through
-3 are implemented on `main`. Automatic CodeQL and required branch protection
+4 are implemented on `main`. Automatic CodeQL and required branch protection
 remain deferred while the repository is private on a GitHub plan that does not
-enable those controls. OAuth authorization-server endpoints, client
-registration, authorization codes, refresh tokens, and protocol integration
-testing remain incomplete.
+enable those controls. Protocol integration testing and secure deployment
+validation remain incomplete.
 
 Do not configure Cloudflare Tunnel access to MCP routes until Phases 1 through
 5 are complete and a security-reviewed release is published.
@@ -478,9 +477,9 @@ Authentication and administration changes require regression coverage for:
 ## Roadmap
 
 Complete the implementation phases above in order. Phase 0 runtime and active
-CI controls and Phases 1 through 3 are implemented on `main`; GitHub-hosted
+CI controls and Phases 1 through 4 are implemented on `main`; GitHub-hosted
 CodeQL and branch protection tasks remain deferred while the repository is
-private on the current plan. Phases 4 and 5 remain required before external MCP
+private on the current plan. Phase 5 remains required before external MCP
 exposure.
 
 CodeQL is checked in but manual while the repository remains private because

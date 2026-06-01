@@ -14,6 +14,7 @@ through Cloudflare Tunnel until the OAuth and security phases in
 - [ ] Deploy by immutable image digest rather than only a mutable tag.
 - [ ] Enable OAuth and verify protected-resource and authorization-server
       metadata.
+- [ ] Set the separate OAuth-user password and test login and consent.
 - [ ] Verify unauthenticated MCP requests fail with `401`.
 - [ ] Verify insufficient scopes fail with `403`.
 - [ ] Keep the administration listener disabled or LAN-only.

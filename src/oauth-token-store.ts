@@ -22,6 +22,7 @@ export function issueToken(
     scope?: string;
     routes?: string[]; // undefined or empty → all routes ('*')
     expiresAt?: number; // Unix timestamp; undefined → no expiry
+    refreshFamilyId?: string;
   },
 ): { id: number; plaintext: string } {
   const plaintext = randomBytes(32).toString("base64url");
@@ -31,8 +32,9 @@ export function issueToken(
 
   const result = db
     .prepare(
-      `INSERT INTO oauth_tokens (token_hash, description, scope, routes, expires_at)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO oauth_tokens
+       (token_hash, description, scope, routes, expires_at, refresh_family_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
     .run(
       tokenHash,
@@ -40,6 +42,7 @@ export function issueToken(
       opts.scope ?? "",
       routes,
       opts.expiresAt ?? null,
+      opts.refreshFamilyId ?? null,
     );
 
   return { id: Number(result.lastInsertRowid), plaintext };

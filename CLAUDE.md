@@ -50,6 +50,7 @@ The gateway is a Fastify HTTP proxy that routes path-based MCP streamable HTTP t
 - `src/config-writer.ts` — `writeConfigAtomic(configPath, content)` validates YAML content, writes via temp file + fsync + atomic rename, keeps up to 5 timestamped `.bak` backups of the previous file.
 - `src/state.ts` — `StateStore` wraps `node:sqlite` (`DatabaseSync`). `open()` creates the state directory (mode 0700), opens/creates `gateway.db` (mode 0600), runs SQLite PRAGMAs (WAL, foreign keys, synchronous=NORMAL), applies pending migrations in transactions, and runs an integrity check. `close()` closes the database. The `database` getter exposes the handle for admin/OAuth routes. `MIGRATIONS` array is the source of truth for all schema versions; names must be stable across releases.
 - `src/oauth-token-store.ts` — opaque OAuth token CRUD: `issueToken` (32-byte random plaintext → SHA-256 hash stored), `lookupToken` (validates hash + not-revoked + not-expired + route audience), `revokeToken` (soft-delete via `revoked_at`), `listTokens`, `tokenStatus`, `hasScope` (space-separated scope membership check).
+- `src/oauth-authorization-server.ts` — embedded OAuth authorization server: metadata, static clients, Client ID Metadata Documents, rate-limited dynamic registration, separate resource-owner password login and consent, PKCE S256 authorization codes, resource indicators, refresh rotation with replay-family revocation, and revocation.
 - `src/admin-auth.ts` — all authentication primitives: Argon2id password hashing (`@node-rs/argon2`), one-time bootstrap credential (SHA-256 hash stored, timing-safe comparison), session management (32-byte random token → SHA-256 hash in DB), CSRF tokens (24-byte random, session-bound), per-IP login rate limiting (DB-backed, survives restarts), and audit event logging.
 - `src/admin-app.ts` — separate Fastify instance for the admin listener (default port 8789). Routes: `GET/POST /admin/setup` (first-run bootstrap), `GET/POST /admin/login`, `POST /admin/logout`, `GET /admin/dashboard`, `GET /admin/config`, `POST /admin/config/preview` (validates YAML via temp file), `POST /admin/config` (saves with session rotation), `GET /admin/tokens`, `GET /admin/tokens/new`, `POST /admin/tokens` (issue — shows plaintext once), `POST /admin/tokens/:id/revoke`. Every response gets security headers (DENY framing, nosniff, no-referrer, CSP, no-store). All state-changing routes require both session auth and CSRF validation. Config save rotates the session token and reports that a gateway restart is required.
 
@@ -63,7 +64,7 @@ Each `path: /prefix` + `upstream: http://backend` entry in `routes[]` causes the
 | `/prefix/sse`      | GET             | `backend/sse`      | Legacy HTTP+SSE — rewrites `endpoint` event URL |
 | `/prefix/messages` | POST DELETE     | `backend/messages` | Legacy HTTP+SSE messages                        |
 
-**SSE endpoint URL rewriting:** When an upstream SSE response contains an `event: endpoint` event (used by the legacy HTTP+SSE transport to tell clients where to POST messages), the gateway rewrites the URL in the `data:` field from the upstream's internal address to the gateway's own `/prefix/messages` URL. The public host is derived from the `Host` request header (which Cloudflare Tunnel forwards as the public hostname). After the endpoint event is processed, subsequent SSE chunks pass through as raw bytes.
+**SSE endpoint URL rewriting:** When an upstream SSE response contains an `event: endpoint` event (used by the legacy HTTP+SSE transport to tell clients where to POST messages), the gateway rewrites the URL in the `data:` field from the upstream's internal address to the gateway's own `/prefix/messages` URL. The public URL is derived from the configured `security.publicOrigin`, never from a request header. After the endpoint event is processed, subsequent SSE chunks pass through as raw bytes.
 
 **Request flow:**
 
@@ -100,7 +101,7 @@ Key security defaults: `allowPrivateUpstreamsOnly: true` (blocks public-internet
 
 - Do not commit real hostnames, IPs, tokens, credentials, or machine-specific paths — they belong in gitignored `gateway.yaml` and `.env`.
 - `src/server.ts` is excluded from coverage thresholds intentionally — do not add it to `--test-coverage-include` flags.
-- Coverage thresholds (90% lines, 75% branches, 90% functions) are applied to the aggregate of all `--test-coverage-include` files: `src/admin-app.ts`, `src/admin-auth.ts`, `src/app.ts`, `src/config.ts`, `src/config-service.ts`, `src/config-writer.ts`, `src/oauth-token-store.ts`, `src/state.ts`, `src/tool-policy.ts`, and `src/upstream-dispatcher.ts`. Changes to any of these files must maintain the aggregate thresholds.
+- Coverage thresholds (90% lines, 75% branches, 90% functions) are applied to the aggregate of all `--test-coverage-include` files: `src/admin-app.ts`, `src/admin-auth.ts`, `src/app.ts`, `src/config.ts`, `src/config-service.ts`, `src/config-writer.ts`, `src/oauth-authorization-server.ts`, `src/oauth-token-store.ts`, `src/state.ts`, `src/tool-policy.ts`, and `src/upstream-dispatcher.ts`. Changes to any of these files must maintain the aggregate thresholds.
 - Security-sensitive changes require a regression test.
 - The `/health` endpoint intentionally exposes nothing beyond `{ status: "ok" }`. Do not add routes, version, or upstream details to it.
 - The `/diagnostics` endpoint is disabled by default; it requires `GATEWAY_DIAGNOSTICS_TOKEN` ≥ 32 chars and Bearer auth. Token comparison uses `timingSafeEqual`.
@@ -125,6 +126,13 @@ Phase 3 adds RFC 6750 Bearer token enforcement and RFC 9728 protected resource m
 
 **Token issuance:** Admin UI at `/admin/tokens`. Tokens are 32-byte random base64url strings; only the SHA-256 hash is stored. Plaintext is shown once. Tokens carry optional description, scope, route audience, and expiry.
 
+## OAuth Authorization Server (Phase 4)
+
+When `oauth.enabled: true`, the public listener exposes authorization-server
+metadata plus `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`, and
+`/oauth/register`. OAuth login uses a separate resource-owner password managed
+at `/admin/oauth-user`; do not reuse the LAN administration password.
+
 ## Current Status
 
-Phases 0 (security baseline), 1 (reloadable config, SQLite state store, atomic config writes), 2 (local administration — separate admin listener, Argon2id auth, session/CSRF, rate limiting, config editor UI), and 3 (OAuth Resource Server — Bearer token enforcement, RFC 9728 metadata, token management UI) are complete. See `docs/SECURE_DEPLOYMENT_CHECKLIST.md` for the full exposure-readiness checklist.
+Phases 0 (security baseline), 1 (reloadable config, SQLite state store, atomic config writes), 2 (local administration — separate admin listener, Argon2id auth, session/CSRF, rate limiting, config editor UI), 3 (OAuth Resource Server — Bearer token enforcement, RFC 9728 metadata, token management UI), and 4 (embedded OAuth Authorization Server — discovery, clients, PKCE authorization codes, refresh rotation, revocation) are complete. See `docs/SECURE_DEPLOYMENT_CHECKLIST.md` for the full exposure-readiness checklist.

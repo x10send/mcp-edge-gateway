@@ -20,6 +20,19 @@ type UpstreamResponse = Awaited<ReturnType<SendUpstream>>;
 const config: GatewayConfig = {
   server: { host: "127.0.0.1", port: 8788, logLevel: "silent" },
   diagnostics: { enabled: false, tokenEnv: "GATEWAY_DIAGNOSTICS_TOKEN" },
+  oauth: {
+    enabled: false,
+    issuer: "https://localhost",
+    insecureAllowHttpIssuer: false,
+    accessTokenTtlSeconds: 900,
+    refreshTokenTtlSeconds: 2_592_000,
+    authorizationCodeTtlSeconds: 300,
+    authorizationTransactionTtlSeconds: 600,
+    dynamicRegistrationLimitPerHour: 20,
+    loginLimitPerHour: 10,
+    loginLockoutSeconds: 900,
+    staticClients: [],
+  },
   security: {
     allowedHosts: ["localhost", "127.0.0.1"],
     trustedProxies: [],
@@ -336,11 +349,16 @@ test("proxy rejects SSE streams above the configured concurrency limit", async (
   await app.close();
 });
 
-test("logger redaction covers credential-bearing headers", () => {
+test("logger redaction covers credential-bearing headers and OAuth form fields", () => {
   assert.deepEqual(LOGGER_REDACT_PATHS, [
     "req.headers.authorization",
     "req.headers.cookie",
     "req.headers.proxy-authorization",
+    "req.body.code",
+    "req.body.code_verifier",
+    "req.body.password",
+    "req.body.refresh_token",
+    "req.body.token",
     "res.headers.set-cookie",
   ]);
 });
