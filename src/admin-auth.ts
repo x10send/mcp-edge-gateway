@@ -233,7 +233,10 @@ export type AuditEventType =
   | "config_preview"
   | "token_issued"
   | "token_revoked"
-  | "oauth_user_password_changed";
+  | "oauth_user_password_changed"
+  | "route_added"
+  | "route_deleted"
+  | "route_whitelist_saved";
 
 export function appendAuditEvent(
   db: DatabaseSync,

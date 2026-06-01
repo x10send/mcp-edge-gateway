@@ -488,6 +488,85 @@ routes:
   );
 });
 
+test("loadConfig accepts route-level tool whitelist", () => {
+  const config = loadYaml(`
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+    tools:
+      whitelist:
+        - get_status
+        - list_containers
+`);
+  assert.deepEqual(config.routes[0]?.tools?.whitelist, [
+    "get_status",
+    "list_containers",
+  ]);
+});
+
+test("loadConfig accepts upstreamAuth bearer type", () => {
+  const config = loadYaml(`
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+    upstreamAuth:
+      type: bearer
+      tokenEnv: MY_TOKEN
+`);
+  assert.deepEqual(config.routes[0]?.upstreamAuth, {
+    type: "bearer",
+    tokenEnv: "MY_TOKEN",
+  });
+});
+
+test("loadConfig accepts upstreamAuth header type", () => {
+  const config = loadYaml(`
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+    upstreamAuth:
+      type: header
+      headerName: X-Api-Key
+      secretEnv: MY_SECRET
+`);
+  assert.deepEqual(config.routes[0]?.upstreamAuth, {
+    type: "header",
+    headerName: "X-Api-Key",
+    secretEnv: "MY_SECRET",
+  });
+});
+
+test("loadConfig rejects upstreamAuth with unknown type", () => {
+  assert.throws(
+    () =>
+      loadYaml(`
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+    upstreamAuth:
+      type: basic
+      tokenEnv: MY_TOKEN
+`),
+    /must be "bearer" or "header"/,
+  );
+});
+
+test("loadConfig rejects upstreamAuth header with invalid header name", () => {
+  assert.throws(
+    () =>
+      loadYaml(`
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+    upstreamAuth:
+      type: header
+      headerName: "Bad Header Name"
+      secretEnv: MY_SECRET
+`),
+    /valid HTTP header name/,
+  );
+});
+
 function loadYaml(contents: string, addDevelopmentOverride = true) {
   const directory = mkdtempSync(join(tmpdir(), "mcp-edge-gateway-"));
   const file = join(directory, "gateway.yaml");

@@ -5,7 +5,7 @@ import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import fastifyCookie from "@fastify/cookie";
 import fastifyFormbody from "@fastify/formbody";
 import { request as defaultSendUpstream, type Dispatcher } from "undici";
-import type { GatewayConfig } from "./config.js";
+import type { GatewayConfig, UpstreamAuthConfig } from "./config.js";
 import { hasScope, lookupToken } from "./oauth-token-store.js";
 import {
   registerOAuthAuthorizationServer,
@@ -255,6 +255,8 @@ export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
         acquireStreamSlot,
         undefined,
         routeAuth,
+        route.upstreamAuth,
+        env,
       ),
     });
 
@@ -272,6 +274,8 @@ export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
         acquireStreamSlot,
         messagesGatewayPath,
         routeAuth,
+        route.upstreamAuth,
+        env,
       ),
     });
 
@@ -289,6 +293,8 @@ export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
         acquireStreamSlot,
         undefined,
         routeAuth,
+        route.upstreamAuth,
+        env,
       ),
     });
   }
@@ -307,6 +313,8 @@ function createProxyHandler(
   // When set, rewrites SSE endpoint events to point at this gateway path
   sseEndpointGatewayPath?: string,
   routeAuth?: RouteAuthOptions,
+  upstreamAuthConfig?: UpstreamAuthConfig,
+  env?: NodeJS.ProcessEnv,
 ) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
     // Reject access_token in query string — RFC 6750 §2.3 deprecates URI tokens
@@ -417,10 +425,21 @@ function createProxyHandler(
       "proxying MCP request",
     );
 
+    const upstreamHeaders = copyRequestHeaders(request.headers);
+    if (upstreamAuthConfig) {
+      const authHeader = buildUpstreamAuthHeader(upstreamAuthConfig, env ?? {});
+      if (!authHeader) {
+        return reply.code(502).send({
+          error: "Upstream authentication is misconfigured",
+        });
+      }
+      upstreamHeaders[authHeader.name] = authHeader.value;
+    }
+
     // undici default maxRedirections is 0; redirects are never followed.
     const upstream = await sendUpstream(targetUrl, {
       method: request.method as Dispatcher.HttpMethod,
-      headers: copyRequestHeaders(request.headers),
+      headers: upstreamHeaders,
       body,
       headersTimeout: config.security.upstreamHeadersTimeoutMs,
       bodyTimeout: config.security.upstreamBodyTimeoutMs,
@@ -669,6 +688,22 @@ function isAllowedHost(
       allowedHost.replace(/^\[|\]$/g, "").toLowerCase() ===
       hostname.toLowerCase(),
   );
+}
+
+function buildUpstreamAuthHeader(
+  auth: UpstreamAuthConfig,
+  env: NodeJS.ProcessEnv,
+): { name: string; value: string } | undefined {
+  if (auth.type === "bearer") {
+    const value = auth.tokenEnv ? (env[auth.tokenEnv] ?? "") : "";
+    return value
+      ? { name: "authorization", value: `Bearer ${value}` }
+      : undefined;
+  }
+  // type === "header"
+  const value = auth.secretEnv ? (env[auth.secretEnv] ?? "") : "";
+  const name = (auth.headerName ?? "").toLowerCase();
+  return value && name ? { name, value } : undefined;
 }
 
 function hasBearerToken(

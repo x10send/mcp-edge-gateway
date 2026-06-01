@@ -159,6 +159,18 @@ export const MIGRATIONS: Migration[] = [
         ON oauth_refresh_tokens(family_id);
     `,
   },
+  {
+    name: "005_route_tool_cache",
+    sql: `
+      CREATE TABLE route_tool_cache (
+        route_path    TEXT    NOT NULL,
+        tool_name     TEXT    NOT NULL,
+        description   TEXT,
+        discovered_at INTEGER NOT NULL DEFAULT (unixepoch()),
+        PRIMARY KEY (route_path, tool_name)
+      );
+    `,
+  },
 ];
 
 export class StateStore {

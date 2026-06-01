@@ -320,15 +320,15 @@ one-time setup credential and must not create a default password.
 
 ### Current Exposure Status
 
-The `v0.1.0` image is a development baseline and must not be exposed to
-untrusted clients. Phase 0 runtime and active CI hardening and Phases 1 through
-4 are implemented on `main`. Automatic CodeQL and required branch protection
-remain deferred while the repository is private on a GitHub plan that does not
-enable those controls. Protocol integration testing and secure deployment
-validation remain incomplete.
+Phases 0 through 5 are complete and tagged `v0.1.0-rc.1`. Live validation
+against the Unraid MCP backend confirmed correct proxy behavior, tool blocking,
+and session relay. Cloudflare Tunnel forwarding and trusted-proxy configuration
+require live validation against the prerelease image before the `v0.1.0`
+production tag is applied.
 
-Do not configure Cloudflare Tunnel access to MCP routes until Phases 1 through
-5 are complete and a security-reviewed release is published.
+Do not configure Cloudflare Tunnel access to MCP routes until
+`SECURE_DEPLOYMENT_CHECKLIST.md` is satisfied against the `v0.1.0-rc.1` image
+and `v0.1.0` is tagged.
 
 ### Exposure Readiness Checklist
 
@@ -476,11 +476,13 @@ Authentication and administration changes require regression coverage for:
 
 ## Roadmap
 
-Complete the implementation phases above in order. Phase 0 runtime and active
-CI controls and Phases 1 through 4 are implemented on `main`; GitHub-hosted
-CodeQL and branch protection tasks remain deferred while the repository is
-private on the current plan. Phase 5 remains required before external MCP
-exposure.
+Phases 0 through 5 are complete and tagged `v0.1.0-rc.1`. GitHub-hosted CodeQL
+and branch protection tasks remain deferred while the repository is private on
+the current plan. External MCP exposure via Cloudflare Tunnel requires
+completing the `SECURE_DEPLOYMENT_CHECKLIST.md` against the prerelease image
+before tagging `v0.1.0`.
+
+Phase 6 is the next active milestone.
 
 CodeQL is checked in but manual while the repository remains private because
 GitHub requires Advanced Security for private-repository result uploads. Enable
@@ -492,20 +494,96 @@ GitHub plan that supports protection rules for private repositories. The target
 required checks are `check`, `docker-build`, and `secret-scan`, with CodeQL
 added after automatic CodeQL triggers are enabled.
 
-### Phase 6: Backend Expansion
+### Phase 6: Route Management and Upstream Configuration
 
-- Add local route configuration for Home Assistant, Hubitat, and Plex MCP
-  servers as they become available.
-- Add backend-specific compatibility tests where behavior differs.
-- Add operational documentation for logging and troubleshooting.
+Replace static YAML-only route management with a UI-driven flow in the admin
+app. The goal is to let an operator add any number of named MCP endpoints
+(Unraid, Home Assistant, Hubitat, Plex, etc.) without editing YAML by hand, and
+to configure exactly which tools each endpoint exposes to remote clients.
+
+#### 6.1 Route Management UI
+
+- Add add/remove/edit route forms to the admin app.
+- Route form fields: display name, path prefix (auto-derived as `/name` or
+  operator-specified), upstream base URL.
+- Validate the upstream URL using the same private-network checks applied to
+  YAML-loaded routes.
+- Write route changes to `gateway.yaml` atomically via `writeConfigAtomic` and
+  display a "restart required" notice.
+- Verify route-management operations are absent from the public listener.
+
+#### 6.2 Tool Discovery on Add
+
+When an operator adds a route, the admin app attempts a one-shot MCP client
+session against the upstream (initialize → `tools/list` → close) using the
+internal undici dispatcher. The discovered tool list is:
+
+- Displayed as checkboxes in the admin UI.
+- Pre-checked for all tools not matching the dangerous defaults.
+- Dangerous defaults (`shell`, `exec`, `write`, `delete`, `restart`, `stop`,
+  `start`, `reboot`, `shutdown`, `update`, `install`) pre-unchecked with an
+  explanatory label.
+- Stored in the SQLite state database as a per-route discovery cache (tool
+  name, description, last-seen timestamp).
+
+If the upstream is unreachable at add-time, the form continues without a
+discovery result and falls back to the existing global deny policy. A
+"Refresh tools" button on the route detail page re-runs discovery at any time.
+
+#### 6.3 Per-Route Tool Whitelist
+
+Add a `whitelist` enforcement mode to the route tool policy:
+
+- New `routes[n].tools.whitelist: [...]` field in `gateway.yaml`.
+- When `whitelist` is populated, the gateway enforces a strict allow-list:
+  `findBlockedCall` blocks any `tools/call` not on the list, and
+  `filterToolsListPayload` strips non-whitelisted tools from `tools/list`
+  JSON responses.
+- When `whitelist` is absent, existing allow/deny glob behavior is unchanged.
+- The whitelist and the allow/deny glob lists are independent; deny globs
+  always win if both apply.
+- The admin UI populates `whitelist` from the tool-discovery checkbox
+  selections and writes it to `gateway.yaml` alongside the route.
+
+Security tests must cover: whitelist blocks unlisted call, whitelist filters
+tools/list, routes without a whitelist still apply deny-glob policy, an empty
+whitelist blocks all tool calls.
+
+#### 6.4 Per-Route Upstream Auth Credentials
+
+Some MCP backends require authentication on the upstream connection (Bearer
+token, API key, custom header). The gateway injects upstream auth credentials
+before dispatching to the backend, keeping them out of MCP request headers
+forwarded by clients.
+
+- New `routes[n].upstream.auth` field in `gateway.yaml`:
+  - `type: bearer`, `tokenEnv: ENV_VAR_NAME` — injects
+    `Authorization: Bearer <value>` read from the named environment variable.
+  - `type: header`, `headerName: X-Api-Key`, `secretEnv: ENV_VAR_NAME` —
+    injects an arbitrary header read from the named environment variable.
+- Credentials are read from environment variables at request time, never
+  stored in `gateway.yaml` or the SQLite database.
+- The admin UI exposes an auth configuration form per route: type selector +
+  env var name field. The form stores only the env var reference, not the
+  secret value.
+- Log redaction must cover upstream auth headers.
+- Security tests must cover: auth header is injected before upstream dispatch,
+  auth header is not forwarded to clients in upstream responses, a missing env
+  var causes the request to fail closed with a 502.
+
+Adding Home Assistant, Hubitat, Plex, and other local MCP backends is an
+operational outcome of Phase 6: once the route management UI exists, adding a
+new backend is a form submission with tool selection, not a YAML edit.
 
 ### Phase 7: Later Hardening
 
-- Add request timeouts, body-size limits, and configurable upstream retry
-  behavior where MCP semantics permit it.
-- Add metrics and structured audit events for denied calls.
+- Add metrics and structured audit events for denied tool calls.
+- Add backend-specific compatibility tests where upstream behavior differs from
+  the MCP specification.
 - Evaluate DPoP sender-constrained access tokens when client support is
   practical.
+- Add operational documentation for logging, troubleshooting, and multi-backend
+  deployments.
 
 ## References
 

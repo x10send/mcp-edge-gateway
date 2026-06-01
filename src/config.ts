@@ -8,6 +8,16 @@ export interface ToolPolicyConfig {
   deny?: string[];
   defaultDenyDangerousTools?: boolean;
   toolScopes?: Record<string, string[]>; // tool name → required OAuth scopes
+  whitelist?: string[]; // strict per-route allow-list; blocks everything not listed
+}
+
+export type UpstreamAuthType = "bearer" | "header";
+
+export interface UpstreamAuthConfig {
+  type: UpstreamAuthType;
+  tokenEnv?: string; // env var holding the bearer token (type=bearer)
+  headerName?: string; // header name to inject (type=header)
+  secretEnv?: string; // env var holding the header value (type=header)
 }
 
 export interface RouteConfig {
@@ -15,6 +25,7 @@ export interface RouteConfig {
   upstream: string;
   tools?: ToolPolicyConfig;
   requiredScopes?: string[];
+  upstreamAuth?: UpstreamAuthConfig;
 }
 
 export interface SecurityConfig {
@@ -278,6 +289,13 @@ function parseRoutes(value: unknown, security: SecurityConfig): RouteConfig[] {
         route.requiredScopes,
         `routes[${index}].requiredScopes`,
       ),
+      upstreamAuth:
+        route.upstreamAuth === undefined
+          ? undefined
+          : parseUpstreamAuth(
+              route.upstreamAuth,
+              `routes[${index}].upstreamAuth`,
+            ),
     };
   });
 }
@@ -507,7 +525,29 @@ function parseToolPolicy(value: unknown, field: string): ToolPolicyConfig {
       `${field}.defaultDenyDangerousTools`,
     ),
     toolScopes: readScopeRecord(value.toolScopes, `${field}.toolScopes`),
+    whitelist: readStringArray(value.whitelist, `${field}.whitelist`),
   };
+}
+
+function parseUpstreamAuth(value: unknown, field: string): UpstreamAuthConfig {
+  if (!isRecord(value)) {
+    throw new Error(`${field} must be an object`);
+  }
+  const type = readString(value.type, `${field}.type`);
+  if (type !== "bearer" && type !== "header") {
+    throw new Error(`${field}.type must be "bearer" or "header"`);
+  }
+  if (type === "bearer") {
+    const tokenEnv = readString(value.tokenEnv, `${field}.tokenEnv`);
+    return { type, tokenEnv };
+  }
+  // type === "header"
+  const headerName = readString(value.headerName, `${field}.headerName`);
+  const secretEnv = readString(value.secretEnv, `${field}.secretEnv`);
+  if (!/^[a-zA-Z][a-zA-Z0-9\-_]*$/.test(headerName)) {
+    throw new Error(`${field}.headerName must be a valid HTTP header name`);
+  }
+  return { type, headerName, secretEnv };
 }
 
 function readString(value: unknown, field: string, fallback?: string): string {

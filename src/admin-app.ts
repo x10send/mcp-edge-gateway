@@ -5,9 +5,12 @@ import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import fastifyCookie from "@fastify/cookie";
 import fastifyFormbody from "@fastify/formbody";
 import type { DatabaseSync } from "node:sqlite";
+import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import type { GatewayConfig } from "./config.js";
 import { loadConfig } from "./config.js";
 import { writeConfigAtomic } from "./config-writer.js";
+import { discoverTools } from "./upstream-mcp-client.js";
+import { createUpstreamDispatcher } from "./upstream-dispatcher.js";
 import {
   appendAuditEvent,
   consumeBootstrap,
@@ -666,6 +669,404 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
       );
   });
 
+  // ── Route management ─────────────────────────────────────────────────────
+
+  app.get("/admin/routes", async (request, reply) => {
+    const sessionToken = await requireAuth(request, reply);
+    if (!sessionToken) return;
+    const session = lookupSession(db, sessionToken)!;
+
+    const rows = config.routes
+      .map((r) => {
+        const cachedTools = getCachedTools(db, r.path);
+        const whitelistCount = r.tools?.whitelist?.length ?? 0;
+        return `<tr>
+          <td><code>${escapeHtml(r.path)}</code></td>
+          <td><code>${escapeHtml(r.upstream)}</code></td>
+          <td>${cachedTools.length > 0 ? `${whitelistCount > 0 ? whitelistCount + " whitelisted / " : ""}${cachedTools.length} discovered` : "Not discovered"}</td>
+          <td>
+            <a href="/admin/routes${encodeURIComponent(r.path)}/tools">Manage tools</a>
+            &nbsp;
+            <form method="POST" action="/admin/routes${encodeURIComponent(r.path)}/delete" style="display:inline">
+              <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(session.csrfToken)}">
+              <button type="submit" onclick="return confirm('Delete route ${escapeHtml(r.path)}?')">Delete</button>
+            </form>
+          </td>
+        </tr>`;
+      })
+      .join("\n");
+
+    return reply.type("text/html").send(
+      htmlPage(
+        "Routes",
+        `<h2>MCP Backend Routes</h2>
+        <nav>${navLinks(session.csrfToken)}</nav>
+        <p><a href="/admin/routes/new">+ Add route</a></p>
+        <table border="1" cellpadding="4" style="border-collapse:collapse;width:100%">
+          <thead><tr><th>Path</th><th>Upstream</th><th>Tools</th><th>Actions</th></tr></thead>
+          <tbody>${rows || "<tr><td colspan='4'>No routes configured.</td></tr>"}</tbody>
+        </table>`,
+      ),
+    );
+  });
+
+  app.get("/admin/routes/new", async (request, reply) => {
+    const sessionToken = await requireAuth(request, reply);
+    if (!sessionToken) return;
+    const session = lookupSession(db, sessionToken)!;
+
+    return reply.type("text/html").send(
+      htmlPage(
+        "Add Route",
+        `<h2>Add MCP Backend Route</h2>
+        <nav>${navLinks(session.csrfToken)}</nav>
+        <form method="POST" action="/admin/routes">
+          <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(session.csrfToken)}">
+          <label>Path prefix (e.g. /unraid)<br>
+            <input name="path" type="text" required pattern="^/[^/].*" placeholder="/unraid" style="width:20em">
+          </label><br><br>
+          <label>Upstream base URL (e.g. http://host.local:8043)<br>
+            <input name="upstream" type="text" required placeholder="http://host.local:8043" style="width:30em">
+          </label><br><br>
+          <fieldset><legend>Upstream authentication (optional)</legend>
+            <label>Auth type<br>
+              <select name="authType">
+                <option value="">None</option>
+                <option value="bearer">Bearer token (env var)</option>
+                <option value="header">Custom header (env var)</option>
+              </select>
+            </label><br><br>
+            <label>Env var name holding the token/secret<br>
+              <input name="authEnv" type="text" placeholder="MY_UPSTREAM_TOKEN" style="width:20em">
+            </label><br><br>
+            <label>Header name (for custom header type only)<br>
+              <input name="authHeader" type="text" placeholder="X-Api-Key" style="width:20em">
+            </label>
+          </fieldset><br>
+          <button type="submit">Add route</button>
+        </form>`,
+      ),
+    );
+  });
+
+  app.post("/admin/routes", async (request, reply) => {
+    const sessionToken = await requireAuth(request, reply);
+    if (!sessionToken) return;
+    if (!requireCsrf(request, reply, sessionToken)) return;
+
+    const body = request.body as Record<string, string>;
+    const path = (body.path ?? "").trim();
+    const upstream = (body.upstream ?? "").trim();
+    const authType = (body.authType ?? "").trim();
+    const authEnv = (body.authEnv ?? "").trim();
+    const authHeader = (body.authHeader ?? "").trim();
+
+    if (!path || !upstream) {
+      return reply
+        .code(400)
+        .type("text/html")
+        .send(htmlPage("Add Route", "<p>Path and upstream are required.</p>"));
+    }
+
+    let newYaml: string;
+    try {
+      newYaml = addRouteToYaml(
+        configPath,
+        path,
+        upstream,
+        authType,
+        authEnv,
+        authHeader,
+      );
+    } catch (error) {
+      return reply
+        .code(400)
+        .type("text/html")
+        .send(
+          htmlPage(
+            "Add Route Failed",
+            `<p>${error instanceof Error ? escapeHtml(error.message) : "Unknown error"}</p>
+          <a href="/admin/routes/new">← Back</a>`,
+          ),
+        );
+    }
+
+    try {
+      writeConfigAtomic(configPath, newYaml);
+    } catch (error) {
+      return reply
+        .code(400)
+        .type("text/html")
+        .send(
+          htmlPage(
+            "Save Failed",
+            `<pre>${error instanceof Error ? escapeHtml(error.message) : "Unknown error"}</pre>
+          <a href="/admin/routes/new">← Back</a>`,
+          ),
+        );
+    }
+
+    appendAuditEvent(db, "route_added", clientIp(request), { path });
+    options.onConfigSaved?.();
+
+    // Attempt tool discovery against the new upstream
+    const upstreamDispatcher = createUpstreamDispatcher(config.security);
+    const discovery = await discoverTools(upstream, upstreamDispatcher);
+    await upstreamDispatcher.close();
+
+    if (discovery.tools.length > 0) {
+      upsertCachedTools(db, path, discovery.tools);
+      return reply.redirect(`/admin/routes${encodeURIComponent(path)}/tools`);
+    }
+
+    return reply.type("text/html").send(
+      htmlPage(
+        "Route Added",
+        `<h2>Route Added</h2>
+        <p>Route <code>${escapeHtml(path)}</code> → <code>${escapeHtml(upstream)}</code> saved.</p>
+        ${discovery.error ? `<p>Tool discovery failed: ${escapeHtml(discovery.error)}. You can retry from the tools page later.</p>` : "<p>No tools discovered.</p>"}
+        <p><strong>Restart required</strong> to activate the new route.</p>
+        <a href="/admin/routes">← Back to routes</a>`,
+      ),
+    );
+  });
+
+  // Route path is percent-encoded in the URL; decode it back.
+  app.post("/admin/routes:encodedPath/delete", async (request, reply) => {
+    const sessionToken = await requireAuth(request, reply);
+    if (!sessionToken) return;
+    if (!requireCsrf(request, reply, sessionToken)) return;
+
+    const encodedPath =
+      (request.params as Record<string, string>).encodedPath ?? "";
+    const routePath = decodeURIComponent(encodedPath);
+
+    let newYaml: string;
+    try {
+      newYaml = removeRouteFromYaml(configPath, routePath);
+    } catch (error) {
+      return reply
+        .code(400)
+        .type("text/html")
+        .send(
+          htmlPage(
+            "Delete Failed",
+            `<p>${error instanceof Error ? escapeHtml(error.message) : "Unknown error"}</p>`,
+          ),
+        );
+    }
+
+    try {
+      writeConfigAtomic(configPath, newYaml);
+    } catch (error) {
+      return reply
+        .code(400)
+        .type("text/html")
+        .send(
+          htmlPage(
+            "Delete Failed",
+            `<pre>${error instanceof Error ? escapeHtml(error.message) : "Unknown error"}</pre>`,
+          ),
+        );
+    }
+
+    clearCachedTools(db, routePath);
+    appendAuditEvent(db, "route_deleted", clientIp(request), {
+      path: routePath,
+    });
+    options.onConfigSaved?.();
+
+    return reply.redirect("/admin/routes");
+  });
+
+  // Tool whitelist management — list discovered tools with checkboxes
+  app.get("/admin/routes:encodedPath/tools", async (request, reply) => {
+    const sessionToken = await requireAuth(request, reply);
+    if (!sessionToken) return;
+    const session = lookupSession(db, sessionToken)!;
+
+    const encodedPath =
+      (request.params as Record<string, string>).encodedPath ?? "";
+    const routePath = decodeURIComponent(encodedPath);
+    const route = config.routes.find((r) => r.path === routePath);
+    if (!route) {
+      return reply
+        .code(404)
+        .type("text/html")
+        .send(
+          htmlPage(
+            "Not Found",
+            `<p>Route <code>${escapeHtml(routePath)}</code> not found. It may have been added after the last restart.</p>`,
+          ),
+        );
+    }
+
+    const cachedTools = getCachedTools(db, routePath);
+    const currentWhitelist = new Set(route.tools?.whitelist ?? []);
+    const DANGEROUS = new Set([
+      "shell",
+      "exec",
+      "write",
+      "delete",
+      "restart",
+      "stop",
+      "start",
+      "reboot",
+      "shutdown",
+      "update",
+      "install",
+    ]);
+
+    const isDangerous = (name: string) =>
+      DANGEROUS.has(name.toLowerCase()) ||
+      [...DANGEROUS].some((kw) => name.toLowerCase().includes(kw));
+
+    let toolRows = "";
+    if (cachedTools.length > 0) {
+      toolRows = cachedTools
+        .map((t) => {
+          const dangerous = isDangerous(t.name);
+          const checked =
+            currentWhitelist.size > 0
+              ? currentWhitelist.has(t.name)
+              : !dangerous;
+          return `<tr>
+            <td><input type="checkbox" name="tool" value="${escapeHtml(t.name)}"${checked ? " checked" : ""}></td>
+            <td><code>${escapeHtml(t.name)}</code>${dangerous ? " <span style='color:#c00'>(dangerous)</span>" : ""}</td>
+            <td style="font-size:.9em;color:#555">${escapeHtml(t.description ?? "")}</td>
+          </tr>`;
+        })
+        .join("\n");
+    }
+
+    return reply.type("text/html").send(
+      htmlPage(
+        `Tools: ${routePath}`,
+        `<h2>Tool Whitelist: <code>${escapeHtml(routePath)}</code></h2>
+        <nav>${navLinks(session.csrfToken)}</nav>
+        <p>Checked tools are allowed; unchecked tools are blocked. If no tools are discovered, the global deny policy applies.</p>
+        <form method="POST" action="/admin/routes${encodeURIComponent(routePath)}/discover" style="display:inline">
+          <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(session.csrfToken)}">
+          <button type="submit">↺ Refresh tools from upstream</button>
+        </form>
+        <br><br>
+        ${
+          cachedTools.length === 0
+            ? "<p>No tools discovered yet. Click Refresh to query the upstream.</p>"
+            : `<form method="POST" action="/admin/routes${encodeURIComponent(routePath)}/tools">
+            <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(session.csrfToken)}">
+            <table border="1" cellpadding="4" style="border-collapse:collapse;width:100%">
+              <thead><tr><th>Allow</th><th>Tool</th><th>Description</th></tr></thead>
+              <tbody>${toolRows}</tbody>
+            </table><br>
+            <button type="submit">Save whitelist</button>
+            &nbsp;
+            <a href="/admin/routes">Cancel</a>
+          </form>`
+        }`,
+      ),
+    );
+  });
+
+  // Save tool whitelist
+  app.post("/admin/routes:encodedPath/tools", async (request, reply) => {
+    const sessionToken = await requireAuth(request, reply);
+    if (!sessionToken) return;
+    if (!requireCsrf(request, reply, sessionToken)) return;
+
+    const encodedPath =
+      (request.params as Record<string, string>).encodedPath ?? "";
+    const routePath = decodeURIComponent(encodedPath);
+
+    const body = request.body as Record<string, string | string[]>;
+    const selected = body.tool;
+    const whitelist = Array.isArray(selected)
+      ? selected
+      : typeof selected === "string"
+        ? [selected]
+        : [];
+
+    let newYaml: string;
+    try {
+      newYaml = setRouteWhitelistInYaml(configPath, routePath, whitelist);
+    } catch (error) {
+      return reply
+        .code(400)
+        .type("text/html")
+        .send(
+          htmlPage(
+            "Save Failed",
+            `<pre>${error instanceof Error ? escapeHtml(error.message) : "Unknown error"}</pre>`,
+          ),
+        );
+    }
+
+    try {
+      writeConfigAtomic(configPath, newYaml);
+    } catch (error) {
+      return reply
+        .code(400)
+        .type("text/html")
+        .send(
+          htmlPage(
+            "Save Failed",
+            `<pre>${error instanceof Error ? escapeHtml(error.message) : "Unknown error"}</pre>`,
+          ),
+        );
+    }
+
+    appendAuditEvent(db, "route_whitelist_saved", clientIp(request), {
+      path: routePath,
+      count: whitelist.length,
+    });
+    options.onConfigSaved?.();
+
+    return reply.type("text/html").send(
+      htmlPage(
+        "Whitelist Saved",
+        `<h2>Whitelist Saved</h2>
+        <p>${whitelist.length} tool(s) whitelisted for <code>${escapeHtml(routePath)}</code>.</p>
+        <p><strong>Restart required</strong> to apply the whitelist.</p>
+        <a href="/admin/routes">← Back to routes</a>`,
+      ),
+    );
+  });
+
+  // Trigger tool discovery (re-query upstream, update cache)
+  app.post("/admin/routes:encodedPath/discover", async (request, reply) => {
+    const sessionToken = await requireAuth(request, reply);
+    if (!sessionToken) return;
+    if (!requireCsrf(request, reply, sessionToken)) return;
+
+    const encodedPath =
+      (request.params as Record<string, string>).encodedPath ?? "";
+    const routePath = decodeURIComponent(encodedPath);
+    const route = config.routes.find((r) => r.path === routePath);
+    if (!route) {
+      return reply
+        .code(404)
+        .type("text/html")
+        .send(
+          htmlPage(
+            "Not Found",
+            `<p>Route <code>${escapeHtml(routePath)}</code> not found. Restart the gateway after adding routes.</p>`,
+          ),
+        );
+    }
+
+    const upstreamDispatcher = createUpstreamDispatcher(config.security);
+    const result = await discoverTools(route.upstream, upstreamDispatcher);
+    await upstreamDispatcher.close();
+
+    if (result.tools.length > 0) {
+      upsertCachedTools(db, routePath, result.tools);
+    }
+
+    return reply.redirect(
+      `/admin/routes${encodeURIComponent(routePath)}/tools`,
+    );
+  });
+
   // ── Health (internal liveness) ────────────────────────────────────────────
 
   app.get("/admin/health", async () => ({ status: "ok" }));
@@ -683,6 +1084,164 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
   });
 
   return app;
+}
+
+// ── Route YAML manipulation ───────────────────────────────────────────────────
+
+function readParsedYaml(configPath: string): Record<string, unknown> {
+  const raw: unknown = yamlParse(readFileSync(configPath, "utf8"));
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new Error("gateway.yaml does not contain a YAML object");
+  }
+  return raw as Record<string, unknown>;
+}
+
+function addRouteToYaml(
+  configPath: string,
+  path: string,
+  upstream: string,
+  authType: string,
+  authEnv: string,
+  authHeaderName: string,
+): string {
+  const doc = readParsedYaml(configPath);
+  const routes = Array.isArray(doc.routes) ? [...doc.routes] : [];
+
+  if (
+    routes.some(
+      (r) =>
+        typeof r === "object" &&
+        r !== null &&
+        (r as Record<string, unknown>).path === path,
+    )
+  ) {
+    throw new Error(`Route ${path} already exists`);
+  }
+
+  const entry: Record<string, unknown> = { path, upstream };
+  if (authType === "bearer" && authEnv) {
+    entry.upstreamAuth = { type: "bearer", tokenEnv: authEnv };
+  } else if (authType === "header" && authEnv && authHeaderName) {
+    entry.upstreamAuth = {
+      type: "header",
+      headerName: authHeaderName,
+      secretEnv: authEnv,
+    };
+  }
+
+  doc.routes = [...routes, entry];
+  return yamlStringify(doc, { lineWidth: 0 });
+}
+
+function removeRouteFromYaml(configPath: string, routePath: string): string {
+  const doc = readParsedYaml(configPath);
+  if (!Array.isArray(doc.routes)) {
+    throw new Error("No routes in gateway.yaml");
+  }
+  const filtered = doc.routes.filter(
+    (r) =>
+      !(
+        typeof r === "object" &&
+        r !== null &&
+        (r as Record<string, unknown>).path === routePath
+      ),
+  );
+  if (filtered.length === doc.routes.length) {
+    throw new Error(`Route ${routePath} not found in gateway.yaml`);
+  }
+  if (filtered.length === 0) {
+    throw new Error("Cannot delete the last route");
+  }
+  doc.routes = filtered;
+  return yamlStringify(doc, { lineWidth: 0 });
+}
+
+function setRouteWhitelistInYaml(
+  configPath: string,
+  routePath: string,
+  whitelist: string[],
+): string {
+  const doc = readParsedYaml(configPath);
+  if (!Array.isArray(doc.routes)) {
+    throw new Error("No routes in gateway.yaml");
+  }
+  doc.routes = doc.routes.map((r) => {
+    if (
+      typeof r !== "object" ||
+      r === null ||
+      (r as Record<string, unknown>).path !== routePath
+    ) {
+      return r;
+    }
+    const route = r as Record<string, unknown>;
+    const tools = (
+      typeof route.tools === "object" && route.tools !== null
+        ? { ...(route.tools as Record<string, unknown>) }
+        : {}
+    ) as Record<string, unknown>;
+    if (whitelist.length > 0) {
+      tools.whitelist = whitelist;
+    } else {
+      delete tools.whitelist;
+    }
+    return {
+      ...route,
+      tools: Object.keys(tools).length > 0 ? tools : undefined,
+    };
+  });
+  return yamlStringify(doc, { lineWidth: 0 });
+}
+
+// ── Route tool cache (DB) ─────────────────────────────────────────────────────
+
+interface CachedTool {
+  name: string;
+  description?: string;
+}
+
+function getCachedTools(db: DatabaseSync, routePath: string): CachedTool[] {
+  return (
+    db
+      .prepare(
+        "SELECT tool_name, description FROM route_tool_cache WHERE route_path = ? ORDER BY tool_name",
+      )
+      .all(routePath) as Array<{
+      tool_name: string;
+      description: string | null;
+    }>
+  ).map((r) => ({
+    name: r.tool_name,
+    description: r.description ?? undefined,
+  }));
+}
+
+function upsertCachedTools(
+  db: DatabaseSync,
+  routePath: string,
+  tools: CachedTool[],
+): void {
+  db.exec("BEGIN");
+  try {
+    db.prepare("DELETE FROM route_tool_cache WHERE route_path = ?").run(
+      routePath,
+    );
+    const insert = db.prepare(
+      "INSERT INTO route_tool_cache (route_path, tool_name, description) VALUES (?, ?, ?)",
+    );
+    for (const tool of tools) {
+      insert.run(routePath, tool.name, tool.description ?? null);
+    }
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+}
+
+function clearCachedTools(db: DatabaseSync, routePath: string): void {
+  db.prepare("DELETE FROM route_tool_cache WHERE route_path = ?").run(
+    routePath,
+  );
 }
 
 // ── HTML helpers ──────────────────────────────────────────────────────────────
@@ -724,6 +1283,7 @@ ${body}
 
 function navLinks(csrfToken: string): string {
   return `<a href="/admin/dashboard">Dashboard</a>
+          <a href="/admin/routes">Routes</a>
           <a href="/admin/config">Edit Config</a>
           <a href="/admin/tokens">Tokens</a>
           <a href="/admin/oauth-user">OAuth User</a>

@@ -1078,6 +1078,103 @@ test("proxy returns 401 when token is scoped to a different route", async () => 
   cleanup();
 });
 
+test("upstream auth bearer token is injected from env var", async () => {
+  let capturedHeaders: Record<string, string | string[]> | undefined;
+  const sendUpstream = (async (
+    _url: URL,
+    options: { headers?: Record<string, string | string[]> },
+  ) => {
+    capturedHeaders = options.headers;
+    return upstreamResponse("{}", "application/json");
+  }) as SendUpstream;
+
+  const authConfig: GatewayConfig = {
+    ...config,
+    routes: [
+      {
+        path: "/unraid",
+        upstream: "http://unraid-agent.local:8043",
+        upstreamAuth: { type: "bearer", tokenEnv: "MY_UPSTREAM_TOKEN" },
+      },
+    ],
+  };
+  const app = buildApp(authConfig, {
+    sendUpstream,
+    env: { MY_UPSTREAM_TOKEN: "secret-upstream-token" },
+  });
+
+  await app.inject({
+    method: "GET",
+    url: "/unraid/mcp",
+    headers: { host: "localhost" },
+  });
+
+  assert.equal(capturedHeaders?.authorization, "Bearer secret-upstream-token");
+  await app.close();
+});
+
+test("upstream auth custom header is injected from env var", async () => {
+  let capturedHeaders: Record<string, string | string[]> | undefined;
+  const sendUpstream = (async (
+    _url: URL,
+    options: { headers?: Record<string, string | string[]> },
+  ) => {
+    capturedHeaders = options.headers;
+    return upstreamResponse("{}", "application/json");
+  }) as SendUpstream;
+
+  const authConfig: GatewayConfig = {
+    ...config,
+    routes: [
+      {
+        path: "/unraid",
+        upstream: "http://unraid-agent.local:8043",
+        upstreamAuth: {
+          type: "header",
+          headerName: "X-Api-Key",
+          secretEnv: "MY_API_KEY",
+        },
+      },
+    ],
+  };
+  const app = buildApp(authConfig, {
+    sendUpstream,
+    env: { MY_API_KEY: "my-api-key-value" },
+  });
+
+  await app.inject({
+    method: "GET",
+    url: "/unraid/mcp",
+    headers: { host: "localhost" },
+  });
+
+  assert.equal(capturedHeaders?.["x-api-key"], "my-api-key-value");
+  await app.close();
+});
+
+test("upstream auth returns 502 when env var is missing", async () => {
+  const authConfig: GatewayConfig = {
+    ...config,
+    routes: [
+      {
+        path: "/unraid",
+        upstream: "http://unraid-agent.local:8043",
+        upstreamAuth: { type: "bearer", tokenEnv: "MISSING_TOKEN_ENV" },
+      },
+    ],
+  };
+  const app = buildApp(authConfig, { env: {} });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/unraid/mcp",
+    headers: { host: "localhost" },
+  });
+
+  assert.equal(response.statusCode, 502);
+  await app.close();
+});
+
 function upstreamResponse(
   payload: string,
   contentType: string,

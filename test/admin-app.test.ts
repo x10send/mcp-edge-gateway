@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
@@ -871,6 +871,165 @@ test("POST /admin/tokens/:id/revoke requires CSRF token", async () => {
       },
     });
     assert.equal(res.statusCode, 403);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// ── Route management ──────────────────────────────────────────────────────────
+
+test("GET /admin/routes lists configured routes", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie } = await doSetup(ctx);
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/admin/routes",
+      headers: { cookie },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.ok(res.body.includes("/unraid"));
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("POST /admin/routes adds a new route and writes gateway.yaml", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie, csrfToken } = await doSetup(ctx);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/routes",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      payload: `_csrf=${encodeURIComponent(csrfToken)}&path=%2Fhomeassistant&upstream=http%3A%2F%2F192.168.1.100%3A8123&authType=`,
+    });
+    // Either 200 (discovery failed, shows page) or 302 (discovery succeeded, redirect to tools)
+    assert.ok(res.statusCode === 200 || res.statusCode === 302);
+    const written = readFileSync(ctx.configPath, "utf8");
+    assert.ok(written.includes("/homeassistant"));
+    assert.ok(written.includes("192.168.1.100"));
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("POST /admin/routes rejects duplicate route path", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie, csrfToken } = await doSetup(ctx);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/routes",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      payload: `_csrf=${encodeURIComponent(csrfToken)}&path=%2Funraid&upstream=http%3A%2F%2F192.168.1.50%3A8043&authType=`,
+    });
+    assert.equal(res.statusCode, 400);
+    assert.ok(res.body.includes("already exists"));
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("POST /admin/routes/:path/delete removes route and writes gateway.yaml", async () => {
+  // First add a second route so deletion doesn't leave zero routes
+  const ctx = setupTest();
+  try {
+    const { cookie, csrfToken } = await doSetup(ctx);
+    // Add /homeassistant first
+    await ctx.app.inject({
+      method: "POST",
+      url: "/admin/routes",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      payload: `_csrf=${encodeURIComponent(csrfToken)}&path=%2Fhomeassistant&upstream=http%3A%2F%2F192.168.1.100%3A8123&authType=`,
+    });
+
+    // Get fresh CSRF token
+    const sessionRow = ctx.db
+      .prepare("SELECT csrf_token FROM admin_sessions ORDER BY id DESC LIMIT 1")
+      .get() as { csrf_token: string } | undefined;
+    const newCsrf = sessionRow?.csrf_token ?? csrfToken;
+
+    // Now delete /homeassistant
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/admin/routes${encodeURIComponent("/homeassistant")}/delete`,
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      payload: `_csrf=${encodeURIComponent(newCsrf)}`,
+    });
+    assert.equal(res.statusCode, 302);
+    const written = readFileSync(ctx.configPath, "utf8");
+    assert.ok(!written.includes("/homeassistant"));
+    assert.ok(written.includes("/unraid"));
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("POST /admin/routes/:path/delete rejects deleting the last route", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie, csrfToken } = await doSetup(ctx);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/admin/routes${encodeURIComponent("/unraid")}/delete`,
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      payload: `_csrf=${encodeURIComponent(csrfToken)}`,
+    });
+    assert.equal(res.statusCode, 400);
+    assert.ok(res.body.includes("Cannot delete the last route"));
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("GET /admin/routes/:path/tools shows tool whitelist page", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie, csrfToken } = await doSetup(ctx);
+    // Seed the tool cache directly
+    ctx.db
+      .prepare(
+        "INSERT INTO route_tool_cache (route_path, tool_name, description) VALUES (?, ?, ?)",
+      )
+      .run("/unraid", "get_status", "Get status");
+    ctx.db
+      .prepare(
+        "INSERT INTO route_tool_cache (route_path, tool_name, description) VALUES (?, ?, ?)",
+      )
+      .run("/unraid", "system_reboot", "Reboot system");
+
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: `/admin/routes${encodeURIComponent("/unraid")}/tools`,
+      headers: { cookie },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.ok(res.body.includes("get_status"));
+    assert.ok(res.body.includes("system_reboot"));
+    assert.ok(res.body.includes("dangerous"));
+    // Verify CSRF token is present
+    assert.ok(res.body.includes(csrfToken));
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("POST /admin/routes/:path/tools saves whitelist to gateway.yaml", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie, csrfToken } = await doSetup(ctx);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/admin/routes${encodeURIComponent("/unraid")}/tools`,
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      payload: `_csrf=${encodeURIComponent(csrfToken)}&tool=get_status&tool=list_containers`,
+    });
+    assert.equal(res.statusCode, 200);
+    const written = readFileSync(ctx.configPath, "utf8");
+    assert.ok(written.includes("get_status"));
+    assert.ok(written.includes("list_containers"));
+    assert.ok(written.includes("whitelist"));
   } finally {
     await ctx.cleanup();
   }
