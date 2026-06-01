@@ -647,6 +647,34 @@ test("proxy rejects access_token in query string with 400", async () => {
   await app.close();
 });
 
+test("buildApp throws at startup when requireAuth is true but no db provided", () => {
+  assert.throws(
+    () =>
+      buildApp({
+        ...config,
+        security: { ...config.security, requireAuth: true },
+      }),
+    /database.*required/i,
+  );
+});
+
+test("buildApp throws at startup when requiredScopes set on a route but no db provided", () => {
+  assert.throws(
+    () =>
+      buildApp({
+        ...config,
+        routes: [
+          {
+            path: "/unraid",
+            upstream: "http://unraid-agent.local:8043",
+            requiredScopes: ["read"],
+          },
+        ],
+      }),
+    /database.*required/i,
+  );
+});
+
 test("proxy allows request without auth when requireAuth is false and no requiredScopes", async () => {
   const { db, cleanup } = makeDb();
   const sendUpstream = (async () =>

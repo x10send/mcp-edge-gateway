@@ -70,6 +70,17 @@ export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
     throw new Error("Diagnostics token must contain at least 32 characters");
   }
 
+  // Fail fast if auth is required by config but no database was provided.
+  // Without a db, routeAuth is undefined and auth checks are silently skipped.
+  const authRequired =
+    config.security.requireAuth ||
+    config.routes.some((r) => r.requiredScopes && r.requiredScopes.length > 0);
+  if (authRequired && !db) {
+    throw new Error(
+      "A database (options.db) is required when requireAuth or requiredScopes are configured",
+    );
+  }
+
   const upstreamDispatcher = createUpstreamDispatcher(config.security);
   let activeRequests = 0;
   let activeStreams = 0;
