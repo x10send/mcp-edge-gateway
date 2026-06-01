@@ -1,5 +1,6 @@
 services:
   mcp-edge-gateway:
+    image: ${GATEWAY_IMAGE:-ghcr.io/x10send/mcp-edge-gateway:latest}
     build: .
     container_name: mcp-edge-gateway
     restart: unless-stopped

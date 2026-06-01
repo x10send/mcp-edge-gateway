@@ -53,19 +53,25 @@ must be absent or `false` in production.
 
 ### 3. Start the container
 
-Using Docker Compose (see `docker-compose.yml` in the repository):
+Create a `.env` file with host paths (see `README.md` for the full example),
+then pull and start:
 
 ```bash
-GATEWAY_CONFIG=/config/gateway.yaml \
-GATEWAY_STATE_DIR=/config/state \
 docker compose up -d
 ```
 
 Or via Unraid's template system: map host path
-`/mnt/user/appdata/mcp-edge-gateway/config` to container path `/config`.
+`/mnt/user/appdata/mcp-edge-gateway` to container path `/config`, and
+`/mnt/user/appdata/mcp-edge-gateway/state` to `/config/state`.
 
 The public listener binds on port **8788**. The admin listener (when enabled)
 binds on port **8789** and must never be forwarded through Cloudflare Tunnel.
+
+> **Docker requirement:** Set `admin.host: 0.0.0.0` in `gateway.yaml` when
+> running in Docker. Docker's port forwarding connects to the container via its
+> bridge IP, not via the container's loopback (`127.0.0.1`). A service bound
+> only to `127.0.0.1` inside the container is unreachable via published ports.
+> Restrict access instead via `GATEWAY_ADMIN_BIND_ADDRESS` on the host side.
 
 ### 4. First-run bootstrap
 

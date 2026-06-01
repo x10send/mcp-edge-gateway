@@ -7,6 +7,9 @@ admin:
   # Administration UI on a separate listener, never routed through Cloudflare Tunnel.
   # Set enabled: true and publish port 8789 to your LAN interface only.
   # The bootstrap credential is printed to container logs on first start.
+  # Docker deployments: set host to 0.0.0.0 here; restrict access via the HOST-side
+  # port binding (GATEWAY_ADMIN_BIND_ADDRESS in .env). Docker's port forwarding
+  # cannot reach a container service bound only to 127.0.0.1.
   enabled: false
   port: 8789
   host: 127.0.0.1

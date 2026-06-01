@@ -152,34 +152,46 @@ Create the config directory and place the YAML file there:
 ```bash
 mkdir -p /mnt/user/appdata/mcp-edge-gateway
 cp gateway.example.yaml /mnt/user/appdata/mcp-edge-gateway/gateway.yaml
-printf 'GATEWAY_CONFIG_DIR=/mnt/user/appdata/mcp-edge-gateway\n' > .env
 ```
 
-Build and start the container from this repository:
+Create `.env` with the host-side paths (gitignored):
 
 ```bash
-docker compose up -d --build
+printf 'GATEWAY_CONFIG_DIR=/mnt/user/appdata/mcp-edge-gateway\nGATEWAY_STATE_DIR=/mnt/user/appdata/mcp-edge-gateway/state\n' > .env
+```
+
+Pull and start the published image:
+
+```bash
+docker compose up -d
 curl http://localhost:8788/health
 ```
 
-The default Compose profile publishes port `8788` and mounts `/config`
-read-only, with a separate writable `/config/state` mount.
-The ignored `.env` file keeps the machine-specific mount path out of source
-control. For local container development, place the YAML file at the ignored
-`./config/gateway.yaml`.
+To build locally from source instead, set `GATEWAY_IMAGE=` in `.env` (empty
+overrides the default image reference so Compose falls back to `build: .`):
+
+```bash
+printf 'GATEWAY_IMAGE=\n' >> .env
+docker compose up -d --build
+```
+
 After changing the YAML file, restart the container:
 
 ```bash
 docker compose restart mcp-edge-gateway
 ```
 
-When the administration listener is enabled, mount `/config` read-write so
-atomic YAML replacement and backups can work. Set `admin.host: 0.0.0.0`, choose
-a reviewed LAN bind address, and use the admin override:
+When the administration listener is enabled:
+
+1. Set `admin.host: 0.0.0.0` in `gateway.yaml` — Docker's port forwarding
+   cannot reach a container service bound only to `127.0.0.1`.
+2. Mount `/config` read-write so atomic YAML replacement and backups work.
+3. Set `GATEWAY_ADMIN_BIND_ADDRESS` to your Unraid host's LAN IP so the admin
+   UI is reachable from a browser on your LAN:
 
 ```bash
-printf 'GATEWAY_ADMIN_BIND_ADDRESS=127.0.0.1\n' >> .env
-docker compose -f docker-compose.yml -f docker-compose.admin.yml up -d --build
+printf 'GATEWAY_ADMIN_BIND_ADDRESS=192.168.1.x\n' >> .env   # replace with your Unraid LAN IP
+docker compose -f docker-compose.yml -f docker-compose.admin.yml up -d
 ```
 
 Keep the admin bind address LAN-only. Do not forward port `8789` through
