@@ -1,7 +1,8 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { Readable } from "node:stream";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { request as defaultSendUpstream, type Dispatcher } from "undici";
-import type { GatewayConfig, RouteConfig } from "./config.js";
+import type { GatewayConfig } from "./config.js";
 import { ToolPolicy } from "./tool-policy.js";
 import { createUpstreamDispatcher } from "./upstream-dispatcher.js";
 
@@ -97,7 +98,11 @@ export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
       }
       return {
         status: "ok",
-        routes: config.routes.map((route) => route.path),
+        routes: config.routes.flatMap((route) => [
+          `${route.path}/mcp`,
+          `${route.path}/sse`,
+          `${route.path}/messages`,
+        ]),
       };
     });
   }
@@ -122,30 +127,70 @@ export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
     reply.raw.once("finish", release);
   });
 
+  const acquireStreamSlot = () => {
+    if (activeStreams >= config.security.maxConcurrentStreams) {
+      return undefined;
+    }
+    activeStreams += 1;
+    let released = false;
+    return () => {
+      if (!released) {
+        released = true;
+        activeStreams -= 1;
+      }
+    };
+  };
+
   for (const route of config.routes) {
     const policy = new ToolPolicy(config.tools, route.tools);
+    const mcpUpstream = appendSubpath(route.upstream, "/mcp");
+    const sseUpstream = appendSubpath(route.upstream, "/sse");
+    const messagesUpstream = appendSubpath(route.upstream, "/messages");
+    const messagesGatewayPath = `${route.path}/messages`;
+
+    // Streamable HTTP transport
     app.route({
       method: ["GET", "POST", "DELETE"],
-      url: route.path,
+      url: `${route.path}/mcp`,
       handler: createProxyHandler(
-        route,
+        mcpUpstream,
+        route.path,
         policy,
         sendUpstream,
         upstreamDispatcher,
         config,
-        () => {
-          if (activeStreams >= config.security.maxConcurrentStreams) {
-            return undefined;
-          }
-          activeStreams += 1;
-          let released = false;
-          return () => {
-            if (!released) {
-              released = true;
-              activeStreams -= 1;
-            }
-          };
-        },
+        acquireStreamSlot,
+      ),
+    });
+
+    // Legacy SSE transport — SSE connection (GET, rewrites endpoint URL)
+    app.route({
+      method: ["GET"],
+      url: `${route.path}/sse`,
+      handler: createProxyHandler(
+        sseUpstream,
+        route.path,
+        policy,
+        sendUpstream,
+        upstreamDispatcher,
+        config,
+        acquireStreamSlot,
+        messagesGatewayPath,
+      ),
+    });
+
+    // Legacy SSE transport — messages (POST/DELETE, tool policy applies)
+    app.route({
+      method: ["POST", "DELETE"],
+      url: `${route.path}/messages`,
+      handler: createProxyHandler(
+        messagesUpstream,
+        route.path,
+        policy,
+        sendUpstream,
+        upstreamDispatcher,
+        config,
+        acquireStreamSlot,
       ),
     });
   }
@@ -154,12 +199,15 @@ export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
 }
 
 function createProxyHandler(
-  route: RouteConfig,
+  upstreamUrl: string,
+  routePath: string,
   policy: ToolPolicy,
   sendUpstream: typeof defaultSendUpstream,
   upstreamDispatcher: Dispatcher,
   config: GatewayConfig,
   acquireStream: () => (() => void) | undefined,
+  // When set, rewrites SSE endpoint events to point at this gateway path
+  sseEndpointGatewayPath?: string,
 ) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
     const body = serializeBody(request.body);
@@ -168,7 +216,7 @@ function createProxyHandler(
 
     if (blockedCall) {
       request.log.warn(
-        { route: route.path, tool: blockedCall.name },
+        { route: routePath, tool: blockedCall.name },
         "blocked MCP tool call",
       );
       return reply.code(403).send({
@@ -182,17 +230,18 @@ function createProxyHandler(
       });
     }
 
-    const upstreamUrl = buildUpstreamUrl(route.upstream, request.raw.url);
+    const targetUrl = buildUpstreamUrl(upstreamUrl, request.raw.url);
     request.log.info(
       {
-        route: route.path,
-        upstream: upstreamUrl.origin,
+        route: routePath,
+        upstream: targetUrl.origin,
         hasSessionId: request.headers["mcp-session-id"] !== undefined,
       },
       "proxying MCP request",
     );
 
-    const upstream = await sendUpstream(upstreamUrl, {
+    // undici default maxRedirections is 0; redirects are never followed.
+    const upstream = await sendUpstream(targetUrl, {
       method: request.method as Dispatcher.HttpMethod,
       headers: copyRequestHeaders(request.headers),
       body,
@@ -239,10 +288,81 @@ function createProxyHandler(
       };
       reply.raw.once("close", release);
       reply.raw.once("finish", release);
+
+      if (sseEndpointGatewayPath) {
+        const host = request.headers.host ?? request.hostname;
+        const messagesUrl = `${request.protocol}://${host}${sseEndpointGatewayPath}`;
+        return reply.send(
+          Readable.from(rewriteSseEndpointEvent(upstream.body, messagesUrl)),
+        );
+      }
     }
 
     return reply.send(upstream.body);
   };
+}
+
+// Rewrites the SSE "endpoint" event URL to the gateway's messages URL.
+// After the endpoint event is found and rewritten, subsequent chunks pass through unchanged.
+async function* rewriteSseEndpointEvent(
+  body: AsyncIterable<Buffer>,
+  messagesUrl: string,
+): AsyncGenerator<string | Buffer> {
+  let pending = "";
+  let rewrote = false;
+
+  for await (const chunk of body) {
+    if (rewrote) {
+      if (pending) {
+        yield pending;
+        pending = "";
+      }
+      yield chunk;
+      continue;
+    }
+
+    pending += chunk.toString("utf8");
+
+    let boundary: number;
+    while ((boundary = pending.indexOf("\n\n")) !== -1) {
+      const event = pending.slice(0, boundary + 2);
+      pending = pending.slice(boundary + 2);
+
+      const transformed = maybeRewriteEndpointEvent(event, messagesUrl);
+      yield transformed;
+      if (transformed !== event) {
+        rewrote = true;
+        break;
+      }
+    }
+  }
+
+  if (pending) {
+    yield pending;
+  }
+}
+
+function maybeRewriteEndpointEvent(event: string, messagesUrl: string): string {
+  if (!/^event:\s*endpoint\s*$/im.test(event)) {
+    return event;
+  }
+  return event.replace(/^(data:[ \t]?)(.*)$/m, (_, prefix, value) => {
+    const trimmed = value.trim();
+    let qs: string;
+    try {
+      qs = new URL(trimmed).search;
+    } catch {
+      const q = trimmed.indexOf("?");
+      qs = q !== -1 ? trimmed.slice(q) : "";
+    }
+    return `${prefix}${messagesUrl}${qs}`;
+  });
+}
+
+function appendSubpath(base: string, subpath: string): string {
+  const url = new URL(base);
+  url.pathname = url.pathname.replace(/\/$/, "") + subpath;
+  return url.toString();
 }
 
 function buildUpstreamUrl(

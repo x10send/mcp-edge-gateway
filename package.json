@@ -13,13 +13,16 @@
     "lint": "eslint .",
     "start": "node dist/server.js",
     "test": "node --import tsx --test test/**/*.test.ts",
-    "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include='src/app.ts' --test-coverage-include='src/config.ts' --test-coverage-include='src/tool-policy.ts' --test-coverage-include='src/upstream-dispatcher.ts' --test-coverage-lines=90 --test-coverage-branches=75 --test-coverage-functions=90 test/**/*.test.ts",
+    "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include='src/admin-app.ts' --test-coverage-include='src/admin-auth.ts' --test-coverage-include='src/app.ts' --test-coverage-include='src/config.ts' --test-coverage-include='src/config-service.ts' --test-coverage-include='src/config-writer.ts' --test-coverage-include='src/state.ts' --test-coverage-include='src/tool-policy.ts' --test-coverage-include='src/upstream-dispatcher.ts' --test-coverage-lines=90 --test-coverage-branches=75 --test-coverage-functions=90 test/**/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.11.0"
   },
   "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/formbody": "^8.0.2",
+    "@node-rs/argon2": "^2.0.2",
     "fastify": "^5.2.0",
     "undici": "^7.3.0",
     "yaml": "^2.7.0"

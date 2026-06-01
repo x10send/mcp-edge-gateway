@@ -3,6 +3,17 @@ server:
   port: 8788
   logLevel: info
 
+admin:
+  # Administration UI on a separate listener, never routed through Cloudflare Tunnel.
+  # Set enabled: true and publish port 8789 to your LAN interface only.
+  # The bootstrap credential is printed to container logs on first start.
+  enabled: false
+  port: 8789
+  host: 127.0.0.1
+  sessionTtlSeconds: 28800
+  maxLoginAttemptsPerHour: 10
+  loginLockoutSeconds: 900
+
 diagnostics:
   # Diagnostics expose configured route names. Keep disabled unless a local
   # GATEWAY_DIAGNOSTICS_TOKEN is provided to the container.
@@ -36,11 +47,15 @@ tools:
   deny: []
 
 routes:
-  - path: /unraid/mcp
-    upstream: http://unraid-agent.local:8043/mcp
+  # Each entry is a backend prefix. The gateway registers three endpoints per route:
+  #   GET/POST/DELETE /<path>/mcp      — streamable HTTP transport
+  #   GET             /<path>/sse      — legacy HTTP+SSE transport
+  #   POST/DELETE     /<path>/messages — legacy HTTP+SSE messages
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
 
   # Add routes as their local MCP servers become available:
-  # - path: /homeassistant/mcp
-  #   upstream: http://home-assistant.local:8123/mcp
-  # - path: /hubitat/mcp
-  #   upstream: http://hubitat.local/mcp
+  # - path: /homeassistant
+  #   upstream: http://home-assistant.local:8123
+  # - path: /hubitat
+  #   upstream: http://hubitat.local

@@ -29,9 +29,7 @@ const config: GatewayConfig = {
     upstreamResponseHeaderLimitBytes: 16_384,
   },
   tools: {},
-  routes: [
-    { path: "/unraid/mcp", upstream: "http://unraid-agent.local:8043/mcp" },
-  ],
+  routes: [{ path: "/unraid", upstream: "http://unraid-agent.local:8043" }],
 };
 
 test("health reports liveness without exposing configured routes", async () => {
@@ -128,7 +126,7 @@ test("diagnostics require a configured bearer token", async () => {
   assert.equal(denied.statusCode, 401);
   assert.deepEqual(allowed.json(), {
     status: "ok",
-    routes: ["/unraid/mcp"],
+    routes: ["/unraid/mcp", "/unraid/sse", "/unraid/messages"],
   });
   await app.close();
 });
@@ -362,6 +360,220 @@ test("proxy rejects denied tools/call requests before upstream dispatch", async 
   assert.equal(response.statusCode, 403);
   assert.equal(response.json().error.code, -32001);
   assert.equal(dispatchCount, 0);
+  await app.close();
+});
+
+test("legacy SSE endpoint proxies to upstream /sse and rewrites endpoint URL", async () => {
+  let capturedUrl: URL | undefined;
+  const sendUpstream = (async (url: URL) => {
+    capturedUrl = url;
+    return upstreamResponse(
+      "event: endpoint\ndata: http://unraid-agent.local:8043/messages?sessionId=abc\n\n",
+      "text/event-stream",
+    );
+  }) as SendUpstream;
+  const app = buildApp(config, { sendUpstream });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/unraid/sse",
+    headers: { host: "localhost:8788" },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(capturedUrl?.pathname, "/sse");
+  assert.equal(
+    response.body,
+    "event: endpoint\ndata: http://localhost:8788/unraid/messages?sessionId=abc\n\n",
+  );
+  await app.close();
+});
+
+test("legacy SSE endpoint preserves query string on endpoint URL", async () => {
+  const sendUpstream = (async () =>
+    upstreamResponse(
+      "event: endpoint\ndata: http://upstream/messages?sessionId=xyz&foo=bar\n\n",
+      "text/event-stream",
+    )) as SendUpstream;
+  const app = buildApp(config, { sendUpstream });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/unraid/sse",
+    headers: { host: "localhost:8788" },
+  });
+
+  assert.ok(
+    response.body.includes(
+      "data: http://localhost:8788/unraid/messages?sessionId=xyz&foo=bar",
+    ),
+    response.body,
+  );
+  await app.close();
+});
+
+test("legacy SSE endpoint passes non-endpoint events through unchanged", async () => {
+  const sendUpstream = (async () =>
+    upstreamResponse(
+      "event: endpoint\ndata: http://upstream/messages?sessionId=s1\n\nevent: message\ndata: hello\n\n",
+      "text/event-stream",
+    )) as SendUpstream;
+  const app = buildApp(config, { sendUpstream });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/unraid/sse",
+    headers: { host: "localhost" },
+  });
+
+  assert.ok(response.body.includes("event: message\ndata: hello\n\n"));
+  await app.close();
+});
+
+test("legacy SSE endpoint rewrites endpoint URL when data arrives in multiple chunks", async () => {
+  const sendUpstream = (async () => {
+    const body = new PassThrough();
+    // Emit endpoint event in chunk 1, then a message event in chunk 2
+    setImmediate(() => {
+      body.write(
+        "event: endpoint\ndata: http://upstream/messages?sessionId=s2\n\n",
+      );
+      body.end("event: message\ndata: late\n\n");
+    });
+    return {
+      statusCode: 200,
+      headers: { "content-type": "text/event-stream" },
+      body,
+    } as unknown as UpstreamResponse;
+  }) as SendUpstream;
+  const app = buildApp(config, { sendUpstream });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/unraid/sse",
+    headers: { host: "localhost:8788" },
+  });
+
+  assert.ok(
+    response.body.includes(
+      "data: http://localhost:8788/unraid/messages?sessionId=s2",
+    ),
+  );
+  assert.ok(response.body.includes("event: message\ndata: late\n\n"));
+  await app.close();
+});
+
+test("legacy SSE endpoint handles non-endpoint events arriving before the endpoint event", async () => {
+  const sendUpstream = (async () =>
+    upstreamResponse(
+      "event: message\ndata: early\n\nevent: endpoint\ndata: http://upstream/messages?sessionId=s3\n\n",
+      "text/event-stream",
+    )) as SendUpstream;
+  const app = buildApp(config, { sendUpstream });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/unraid/sse",
+    headers: { host: "localhost:8788" },
+  });
+
+  assert.ok(response.body.includes("event: message\ndata: early\n\n"));
+  assert.ok(
+    response.body.includes(
+      "data: http://localhost:8788/unraid/messages?sessionId=s3",
+    ),
+  );
+  await app.close();
+});
+
+test("legacy SSE endpoint rewrites endpoint URL when data field is not a valid URL", async () => {
+  const sendUpstream = (async () =>
+    upstreamResponse(
+      "event: endpoint\ndata: /messages?sessionId=s4\n\n",
+      "text/event-stream",
+    )) as SendUpstream;
+  const app = buildApp(config, { sendUpstream });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/unraid/sse",
+    headers: { host: "localhost:8788" },
+  });
+
+  // Malformed base URL falls back to extracting the query string by index
+  assert.ok(
+    response.body.includes(
+      "data: http://localhost:8788/unraid/messages?sessionId=s4",
+    ),
+  );
+  await app.close();
+});
+
+test("proxy returns upstream 3xx responses without following redirects", async () => {
+  const sendUpstream = (async () => {
+    const body = Readable.from([""]);
+    return {
+      statusCode: 301,
+      headers: {
+        "content-type": "text/html",
+        location: "http://internal.local/secret",
+      },
+      body,
+    } as unknown as UpstreamResponse;
+  }) as SendUpstream;
+  const app = buildApp(config, { sendUpstream });
+
+  const response = await app.inject({ method: "GET", url: "/unraid/mcp" });
+
+  // Gateway forwards the 301 status but strips the Location header.
+  assert.equal(response.statusCode, 301);
+  assert.equal(
+    response.headers.location,
+    undefined,
+    "Location header must be stripped",
+  );
+  await app.close();
+});
+
+test("legacy SSE messages endpoint proxies to upstream /messages with tool policy", async () => {
+  let capturedUrl: URL | undefined;
+  let dispatchCount = 0;
+  const sendUpstream = (async (url: URL) => {
+    capturedUrl = url;
+    dispatchCount += 1;
+    return upstreamResponse("{}", "application/json");
+  }) as SendUpstream;
+  const app = buildApp(config, { sendUpstream });
+
+  // Allowed tool call reaches upstream
+  const allowed = await app.inject({
+    method: "POST",
+    url: "/unraid/messages?sessionId=abc",
+    payload: {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "read_status" },
+    },
+  });
+  assert.equal(allowed.statusCode, 200);
+  assert.equal(capturedUrl?.pathname, "/messages");
+  assert.equal(capturedUrl?.search, "?sessionId=abc");
+
+  // Denied tool call is blocked before upstream
+  const denied = await app.inject({
+    method: "POST",
+    url: "/unraid/messages",
+    payload: {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "run_shell" },
+    },
+  });
+  assert.equal(denied.statusCode, 403);
+  assert.equal(dispatchCount, 1); // only the allowed call reached upstream
+
   await app.close();
 });
 

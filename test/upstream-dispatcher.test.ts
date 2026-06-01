@@ -28,3 +28,35 @@ test("DNS selection uses only private network addresses", () => {
     undefined,
   );
 });
+
+test("DNS selection rejects loopback and link-local addresses", () => {
+  // Loopback
+  assert.equal(
+    selectPrivateLookupAddress([{ address: "127.0.0.1", family: 4 }]),
+    undefined,
+  );
+  assert.equal(
+    selectPrivateLookupAddress([{ address: "::1", family: 6 }]),
+    undefined,
+  );
+  // Link-local / metadata service
+  assert.equal(
+    selectPrivateLookupAddress([{ address: "169.254.169.254", family: 4 }]),
+    undefined,
+  );
+  // Multicast
+  assert.equal(
+    selectPrivateLookupAddress([{ address: "224.0.0.1", family: 4 }]),
+    undefined,
+  );
+});
+
+test("DNS selection prefers the first private address when multiple are available", () => {
+  assert.deepEqual(
+    selectPrivateLookupAddress([
+      { address: "10.0.0.1", family: 4 },
+      { address: "192.168.1.1", family: 4 },
+    ]),
+    { address: "10.0.0.1", family: 4 },
+  );
+});

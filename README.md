@@ -4,16 +4,18 @@ A small Dockerized Fastify gateway for routing MCP streamable HTTP traffic to
 local MCP servers. It is intended to run on Unraid and sit behind a Cloudflare
 Tunnel.
 
-The initial route is:
+Each configured backend exposes three endpoints automatically:
 
 ```text
-https://mcp.example.com/unraid/mcp -> http://unraid-agent.local:8043/mcp
+GET/POST/DELETE /unraid/mcp      -> http://unraid-agent.local:8043/mcp  (streamable HTTP)
+GET             /unraid/sse      -> http://unraid-agent.local:8043/sse  (legacy HTTP+SSE)
+POST/DELETE     /unraid/messages -> http://unraid-agent.local:8043/messages
 ```
 
 ## Features
 
-- Route-based MCP proxying for `GET`, `POST`, and `DELETE`
-- Streaming relay for MCP SSE responses
+- Path-prefix routing: one `routes[]` entry registers `/mcp`, `/sse`, and `/messages` endpoints for a backend
+- Streaming relay for MCP SSE responses; rewrites `endpoint` event URLs for the legacy HTTP+SSE transport
 - Preservation of end-to-end headers, including `Mcp-Session-Id`
 - Configurable case-insensitive glob allowlist and denylist
 - Default denial of tool names containing `shell`, `exec`, `write`, `delete`,
@@ -63,8 +65,8 @@ tools:
   deny: []
 
 routes:
-  - path: /unraid/mcp
-    upstream: http://unraid-agent.local:8043/mcp
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
 ```
 
 `allow` and `deny` entries support `*` globs and are case-insensitive. Deny
@@ -220,10 +222,10 @@ Add another item under `routes`, then restart the gateway:
 
 ```yaml
 routes:
-  - path: /unraid/mcp
-    upstream: http://unraid-agent.local:8043/mcp
-  - path: /homeassistant/mcp
-    upstream: http://home-assistant.local:8123/mcp
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+  - path: /homeassistant
+    upstream: http://home-assistant.local:8123
 ```
 
 ## License
