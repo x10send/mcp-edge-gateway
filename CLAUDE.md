@@ -42,15 +42,16 @@ The gateway is a Fastify HTTP proxy that routes path-based MCP streamable HTTP t
 **Module responsibilities:**
 
 - `src/server.ts` — process entrypoint only: loads config, calls `buildApp`, binds the socket, handles SIGTERM/SIGINT. Excluded from coverage because it just wires process lifecycle.
-- `src/app.ts` — all application logic: builds the Fastify instance, registers `/health` and `/diagnostics` routes, and for each configured route registers three Fastify routes (see transport endpoints below). `createProxyHandler` handles tool-policy enforcement, upstream proxying, and SSE endpoint URL rewriting.
+- `src/app.ts` — all application logic: builds the Fastify instance, registers `/health`, `/diagnostics`, and `/.well-known/oauth-protected-resource` (RFC 9728) routes, and for each configured route registers three Fastify routes plus a per-route metadata endpoint. `createProxyHandler` handles OAuth Bearer token enforcement (rejects `access_token` query params, validates tokens via `lookupToken`, checks route audience + required scopes + tool-level scopes), tool-policy enforcement, upstream proxying, and SSE endpoint URL rewriting.
 - `src/config.ts` — loads and validates `gateway.yaml`. Exports typed interfaces (`GatewayConfig`, `SecurityConfig`, `RouteConfig`, `ToolPolicyConfig`) used everywhere else.
 - `src/tool-policy.ts` — `ToolPolicy` class: evaluates glob-based allow/deny lists. Used in two ways: `findBlockedCall()` rejects `tools/call` requests before they reach the upstream; `filterToolsListPayload()` strips denied tools from `tools/list` JSON responses. SSE streams are never inspected.
 - `src/upstream-dispatcher.ts` — creates the undici `Agent` used for all upstream requests. When `allowPrivateUpstreamsOnly: true`, wraps DNS resolution to reject non-private-network addresses (SSRF mitigation).
 - `src/config-service.ts` — `ConfigService` wraps config loading with a `reload()` method for hot-reload without restarting the process. Holds the current `GatewayConfig` in memory; `reload()` is atomic (throws and leaves current config unchanged if the new file is invalid).
 - `src/config-writer.ts` — `writeConfigAtomic(configPath, content)` validates YAML content, writes via temp file + fsync + atomic rename, keeps up to 5 timestamped `.bak` backups of the previous file.
-- `src/state.ts` — `StateStore` wraps `node:sqlite` (`DatabaseSync`). `open()` creates the state directory (mode 0700), opens/creates `gateway.db` (mode 0600), runs SQLite PRAGMAs (WAL, foreign keys, synchronous=NORMAL), applies pending migrations in transactions, and runs an integrity check. `close()` closes the database. The `database` getter exposes the handle for admin and future OAuth routes. `MIGRATIONS` array is the source of truth for all schema versions; names must be stable across releases.
+- `src/state.ts` — `StateStore` wraps `node:sqlite` (`DatabaseSync`). `open()` creates the state directory (mode 0700), opens/creates `gateway.db` (mode 0600), runs SQLite PRAGMAs (WAL, foreign keys, synchronous=NORMAL), applies pending migrations in transactions, and runs an integrity check. `close()` closes the database. The `database` getter exposes the handle for admin/OAuth routes. `MIGRATIONS` array is the source of truth for all schema versions; names must be stable across releases.
+- `src/oauth-token-store.ts` — opaque OAuth token CRUD: `issueToken` (32-byte random plaintext → SHA-256 hash stored), `lookupToken` (validates hash + not-revoked + not-expired + route audience), `revokeToken` (soft-delete via `revoked_at`), `listTokens`, `tokenStatus`, `hasScope` (space-separated scope membership check).
 - `src/admin-auth.ts` — all authentication primitives: Argon2id password hashing (`@node-rs/argon2`), one-time bootstrap credential (SHA-256 hash stored, timing-safe comparison), session management (32-byte random token → SHA-256 hash in DB), CSRF tokens (24-byte random, session-bound), per-IP login rate limiting (DB-backed, survives restarts), and audit event logging.
-- `src/admin-app.ts` — separate Fastify instance for the admin listener (default port 8789). Routes: `GET/POST /admin/setup` (first-run bootstrap), `GET/POST /admin/login`, `POST /admin/logout`, `GET /admin/dashboard`, `GET /admin/config`, `POST /admin/config/preview` (validates YAML via temp file), `POST /admin/config` (saves with session rotation). Every response gets security headers (DENY framing, nosniff, no-referrer, CSP, no-store). All state-changing routes require both session auth and CSRF validation. Config save rotates the session token and triggers `onConfigSaved` callback (used in `server.ts` for hot-reload).
+- `src/admin-app.ts` — separate Fastify instance for the admin listener (default port 8789). Routes: `GET/POST /admin/setup` (first-run bootstrap), `GET/POST /admin/login`, `POST /admin/logout`, `GET /admin/dashboard`, `GET /admin/config`, `POST /admin/config/preview` (validates YAML via temp file), `POST /admin/config` (saves with session rotation), `GET /admin/tokens`, `GET /admin/tokens/new`, `POST /admin/tokens` (issue — shows plaintext once), `POST /admin/tokens/:id/revoke`. Every response gets security headers (DENY framing, nosniff, no-referrer, CSP, no-store). All state-changing routes require both session auth and CSRF validation. Config save rotates the session token and triggers `onConfigSaved` callback (used in `server.ts` for hot-reload).
 
 **Transport endpoints per configured route:**
 
@@ -70,7 +71,10 @@ Each `path: /prefix` + `upstream: http://backend` entry in `routes[]` causes the
 Incoming request
   → Host header validation (allowedHosts)
   → Concurrent request limit check
+  → Reject access_token in query string (400)
+  → OAuth: if requireAuth or requiredScopes set → validate Bearer token (401/403)
   → Tool policy: findBlockedCall() → 403 if denied (tools/call only; not applied to GET /sse)
+  → Tool scope check: if token auth active and toolScopes configured → 403 if insufficient
   → undici request to upstream (privateLookup enforced)
   → If JSON response: buffer + filterToolsListPayload() + forward
   → If SSE response: acquire stream slot + pipe with lifetime timeout
@@ -88,13 +92,15 @@ Incoming request
 
 Each route entry uses a **base path prefix** (e.g., `/unraid`) and a **base upstream URL** (e.g., `http://unraid-agent.local:8043`). The gateway appends `/mcp`, `/sse`, and `/messages` to both. Paths must not end with `/`, `/mcp`, `/sse`, or `/messages`.
 
-Key security defaults: `allowPrivateUpstreamsOnly: true` (blocks public-internet upstreams at DNS resolution time), `defaultDenyDangerousTools: true` (denies tools matching shell/exec/write/delete/restart/stop/start/reboot/shutdown/update/install).
+Key security defaults: `allowPrivateUpstreamsOnly: true` (blocks public-internet upstreams at DNS resolution time), `defaultDenyDangerousTools: true` (denies tools matching shell/exec/write/delete/restart/stop/start/reboot/shutdown/update/install), `requireAuth: false` (opt-in Bearer token enforcement).
+
+**OAuth token configuration:** `security.requireAuth: true` enforces a valid Bearer token on all routes. `routes[n].requiredScopes: [scope]` enforces both auth and specific scopes on a single route. `routes[n].tools.toolScopes: { toolName: [scope] }` enforces additional per-tool scopes when auth is active. Bearer tokens are issued/revoked via the admin UI and stored as SHA-256 hashes. Tokens carry a route audience (`routes` field) — a token issued for `/unraid` cannot be used on `/other`. Query-string `access_token` is always rejected (400); only `Authorization: Bearer` is accepted.
 
 ## Security Constraints
 
 - Do not commit real hostnames, IPs, tokens, credentials, or machine-specific paths — they belong in gitignored `gateway.yaml` and `.env`.
 - `src/server.ts` is excluded from coverage thresholds intentionally — do not add it to `--test-coverage-include` flags.
-- Coverage thresholds (90% lines, 75% branches, 90% functions) are applied to the aggregate of all `--test-coverage-include` files: `src/admin-app.ts`, `src/admin-auth.ts`, `src/app.ts`, `src/config.ts`, `src/config-service.ts`, `src/config-writer.ts`, `src/state.ts`, `src/tool-policy.ts`, and `src/upstream-dispatcher.ts`. Changes to any of these files must maintain the aggregate thresholds.
+- Coverage thresholds (90% lines, 75% branches, 90% functions) are applied to the aggregate of all `--test-coverage-include` files: `src/admin-app.ts`, `src/admin-auth.ts`, `src/app.ts`, `src/config.ts`, `src/config-service.ts`, `src/config-writer.ts`, `src/oauth-token-store.ts`, `src/state.ts`, `src/tool-policy.ts`, and `src/upstream-dispatcher.ts`. Changes to any of these files must maintain the aggregate thresholds.
 - Security-sensitive changes require a regression test.
 - The `/health` endpoint intentionally exposes nothing beyond `{ status: "ok" }`. Do not add routes, version, or upstream details to it.
 - The `/diagnostics` endpoint is disabled by default; it requires `GATEWAY_DIAGNOSTICS_TOKEN` ≥ 32 chars and Bearer auth. Token comparison uses `timingSafeEqual`.
@@ -109,6 +115,16 @@ The admin app runs as a completely separate Fastify instance on `admin.host:admi
 
 **Admin config settings (in `gateway.yaml`):** `admin.port` (must differ from 8788), `admin.host` (default 127.0.0.1), `admin.sessionTtlSeconds` (default 28800), `admin.maxLoginAttemptsPerHour` (default 10), `admin.loginLockoutSeconds` (default 900). Admin config changes require a gateway restart to take effect.
 
+## OAuth Resource Server (Phase 3)
+
+Phase 3 adds RFC 6750 Bearer token enforcement and RFC 9728 protected resource metadata.
+
+**Discovery:** `GET /.well-known/oauth-protected-resource` (root) and `GET /<prefix>/.well-known/oauth-protected-resource` (per-route) return the resource metadata document. These endpoints are unauthenticated.
+
+**WWW-Authenticate:** 401 responses include `Bearer realm="MCP Gateway", resource_metadata="<url>"`. 403 responses for insufficient scope include `error="insufficient_scope", scope="<required>"`.
+
+**Token issuance:** Admin UI at `/admin/tokens`. Tokens are 32-byte random base64url strings; only the SHA-256 hash is stored. Plaintext is shown once. Tokens carry optional description, scope, route audience, and expiry.
+
 ## Current Status
 
-Phases 0 (security baseline), 1 (reloadable config, SQLite state store, atomic config writes), and 2 (local administration — separate admin listener, Argon2id auth, session/CSRF, rate limiting, config editor UI) are complete. Do not configure Cloudflare Tunnel for MCP routes until OAuth (Phases 3–5 in `ProjectSpec.md`) is implemented. See `docs/SECURE_DEPLOYMENT_CHECKLIST.md` for the full exposure-readiness checklist.
+Phases 0 (security baseline), 1 (reloadable config, SQLite state store, atomic config writes), 2 (local administration — separate admin listener, Argon2id auth, session/CSRF, rate limiting, config editor UI), and 3 (OAuth Resource Server — Bearer token enforcement, RFC 9728 metadata, token management UI) are complete. See `docs/SECURE_DEPLOYMENT_CHECKLIST.md` for the full exposure-readiness checklist.
