@@ -248,6 +248,11 @@ function parseRoutes(value: unknown, security: SecurityConfig): RouteConfig[] {
     if (path.endsWith("/")) {
       throw new Error(`routes[${index}].path must not end with /`);
     }
+    if (!/^\/[a-zA-Z0-9][a-zA-Z0-9/_-]*$/.test(path)) {
+      throw new Error(
+        `routes[${index}].path must contain only letters, digits, hyphens, underscores, and forward slashes`,
+      );
+    }
     if (/\/(mcp|sse|messages)$/i.test(path)) {
       throw new Error(
         `routes[${index}].path must be a base prefix such as /unraid, not a transport path such as /unraid/mcp`,
@@ -278,17 +283,31 @@ function parseRoutes(value: unknown, security: SecurityConfig): RouteConfig[] {
       );
     }
 
+    const tools =
+      route.tools === undefined
+        ? undefined
+        : parseToolPolicy(route.tools, `routes[${index}].tools`);
+    const requiredScopes = readScopeArray(
+      route.requiredScopes,
+      `routes[${index}].requiredScopes`,
+    );
+
+    if (
+      tools?.toolScopes &&
+      Object.keys(tools.toolScopes).length > 0 &&
+      !security.requireAuth &&
+      (!requiredScopes || requiredScopes.length === 0)
+    ) {
+      throw new Error(
+        `routes[${index}].tools.toolScopes has no effect: auth is not required on this route (set security.requireAuth or routes[${index}].requiredScopes)`,
+      );
+    }
+
     return {
       path,
       upstream: upstreamUrl.toString(),
-      tools:
-        route.tools === undefined
-          ? undefined
-          : parseToolPolicy(route.tools, `routes[${index}].tools`),
-      requiredScopes: readScopeArray(
-        route.requiredScopes,
-        `routes[${index}].requiredScopes`,
-      ),
+      tools,
+      requiredScopes,
       upstreamAuth:
         route.upstreamAuth === undefined
           ? undefined

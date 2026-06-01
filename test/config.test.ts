@@ -163,6 +163,42 @@ routes:
   );
 });
 
+test("loadConfig rejects route paths with special characters (XSS prevention)", () => {
+  for (const path of ["/unraid's", "/foo?bar", "/foo bar", "/foo<bar>"]) {
+    assert.throws(
+      () =>
+        loadYaml(`
+routes:
+  - path: "${path}"
+    upstream: http://unraid-agent.local:8043
+`),
+      /letters, digits, hyphens/,
+      `expected rejection for path: ${path}`,
+    );
+  }
+});
+
+test("loadConfig rejects toolScopes without auth requirement", () => {
+  assert.throws(
+    () =>
+      loadYaml(`
+security:
+  requireAuth: false
+  insecureAllowUnauthenticatedMcp: true
+  publicOrigin: http://localhost:8788
+  insecureAllowHttpPublicOrigin: true
+routes:
+  - path: /unraid
+    upstream: http://unraid-agent.local:8043
+    tools:
+      toolScopes:
+        get_status:
+          - read
+`),
+    /toolScopes has no effect/,
+  );
+});
+
 test("loadConfig rejects route that is not an object", () => {
   assert.throws(
     () =>
@@ -441,11 +477,13 @@ routes:
   );
 });
 
-test("loadConfig accepts toolScopes in route tools", () => {
+test("loadConfig accepts toolScopes in route tools when auth is required", () => {
   const config = loadYaml(`
 routes:
   - path: /unraid
     upstream: http://unraid-agent.local:8043
+    requiredScopes:
+      - read
     tools:
       toolScopes:
         read_status:
