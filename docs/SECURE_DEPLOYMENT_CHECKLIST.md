@@ -3,7 +3,7 @@
 ## Development Baseline
 
 The `v0.1.0` image is for LAN-only development. Do not expose MCP routes
-through Cloudflare Tunnel until the OAuth and security gates in
+through Cloudflare Tunnel until the OAuth and security phases in
 [`ProjectSpec.md`](../ProjectSpec.md) are complete.
 
 ## Before External Exposure

@@ -13,7 +13,7 @@
     "lint": "eslint .",
     "start": "node dist/server.js",
     "test": "node --import tsx --test test/**/*.test.ts",
-    "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include='src/app.ts' --test-coverage-include='src/config.ts' --test-coverage-include='src/tool-policy.ts' --test-coverage-lines=90 --test-coverage-branches=75 --test-coverage-functions=90 test/**/*.test.ts",
+    "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include='src/app.ts' --test-coverage-include='src/config.ts' --test-coverage-include='src/tool-policy.ts' --test-coverage-include='src/upstream-dispatcher.ts' --test-coverage-lines=90 --test-coverage-branches=75 --test-coverage-functions=90 test/**/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "engines": {

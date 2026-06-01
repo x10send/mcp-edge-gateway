@@ -315,33 +315,20 @@ one-time setup credential and must not create a default password.
   connection lifetimes are bounded.
 - Cloudflare caching is disabled for MCP, OAuth, and administration paths.
 
-### Current Pre-Exposure Blockers
+### Current Exposure Status
 
 The `v0.1.0` image is a development baseline and must not be exposed to
-untrusted clients. The current implementation still has known gaps:
+untrusted clients. Phase 0 hardening is implemented on `main`, but OAuth
+authentication and scope enforcement are not implemented yet.
 
-- `/health` lists configured MCP route paths.
-- Fastify currently uses broad `trustProxy: true`.
-- Incoming `Authorization` headers are not yet removed before upstream proxy
-  dispatch.
-- Request body limits, upstream timeouts, response limits, concurrent stream
-  limits, and SSE lifetime limits are not configured.
-- Upstream URL validation checks protocol syntax only and does not defend
-  against SSRF, DNS rebinding, or redirects.
-- OAuth authentication and scope enforcement are not implemented.
-- The runtime container has not yet switched to an unprivileged user or a
-  read-only root filesystem deployment profile.
-- CI does not yet run dependency auditing, secret scanning, static security
-  analysis, or container vulnerability scanning.
-
-These items are Gate 0 work. Do not configure Cloudflare Tunnel access to MCP
-routes until all Gate 0 blockers and the OAuth gates are complete.
+Do not configure Cloudflare Tunnel access to MCP routes until Phases 1 through
+5 are complete and a security-reviewed release is published.
 
 ### Exposure Readiness Checklist
 
 External MCP exposure is allowed only when all items are true:
 
-- Gates 0 through 5 are complete and CI is green.
+- Phases 0 through 5 are complete and CI is green.
 - OAuth discovery, authorization, token, refresh, revocation, scope, and
   negative-path protocol tests pass.
 - The public listener exposes no administration routes or internal diagnostics.
@@ -362,7 +349,7 @@ If any item fails, the deployment remains LAN-only.
 
 ### Implementation Sequence
 
-#### Gate 0: Security Baseline
+#### Phase 0: Security Baseline
 
 1. Maintain the checked-in deployment security checklist and keep `v0.1.0`
    marked as development-only.
@@ -390,7 +377,7 @@ If any item fails, the deployment remains LAN-only.
 17. Document digest-pinned image deployment and attestation verification.
 18. Configure protected `main` branch rules requiring CI before merge.
 
-#### Gate 1: Configuration State
+#### Phase 1: Configuration State
 
 1. Refactor configuration loading into a reloadable configuration service.
 2. Split public configuration from secret references.
@@ -401,7 +388,7 @@ If any item fails, the deployment remains LAN-only.
 5. Add restore documentation and credential-rotation requirements.
 6. Add upstream URL validation, redirect rejection, and SSRF-focused tests.
 
-#### Gate 2: Local Administration
+#### Phase 2: Local Administration
 
 1. Add a separate administration application and listener.
 2. Keep the administration listener disabled by default.
@@ -414,7 +401,7 @@ If any item fails, the deployment remains LAN-only.
 9. Add validation previews, atomic save, backup, and reload status.
 10. Verify administration routes are unreachable from the public listener.
 
-#### Gate 3: OAuth Resource Server
+#### Phase 3: OAuth Resource Server
 
 1. Define canonical public resource URIs for each externally reachable MCP
    route.
@@ -427,7 +414,7 @@ If any item fails, the deployment remains LAN-only.
 6. Add route-level and tool-level scope evaluation.
 7. Add `403` insufficient-scope responses for step-up authorization.
 
-#### Gate 4: OAuth Authorization Server
+#### Phase 4: OAuth Authorization Server
 
 1. Add authorization-server metadata with explicit issuer and HTTPS endpoints.
 2. Add authorization-response issuer identifiers for mix-up resistance.
@@ -441,7 +428,7 @@ If any item fails, the deployment remains LAN-only.
 9. Add refresh-token rotation, replay-family revocation, and token revocation.
 10. Add explicit login and consent screens with CSRF and clickjacking defenses.
 
-#### Gate 5: Integration and Release
+#### Phase 5: Integration and Release
 
 1. Run protocol-level OAuth tests against all metadata and token endpoints.
 2. Add end-to-end tests for ChatGPT-compatible OAuth connection behavior.
@@ -483,24 +470,17 @@ Authentication and administration changes require regression coverage for:
 
 ## Roadmap
 
-### Phase 1: Minimal Gateway
+Complete the implementation phases above in order. Phase 0 is implemented on
+`main`. Phases 1 through 5 remain required before external MCP exposure.
 
-- Complete the initial delivery described above.
-- Validate against the Unraid Management Agent.
-- Validate container builds through GitHub Actions.
-
-### Phase 2: OAuth and Local Administration
-
-- Complete Gates 0 through 5 in order.
-
-### Phase 3: Backend Expansion
+### Phase 6: Backend Expansion
 
 - Add local route configuration for Home Assistant, Hubitat, and Plex MCP
   servers as they become available.
 - Add backend-specific compatibility tests where behavior differs.
 - Add operational documentation for logging and troubleshooting.
 
-### Phase 4: Hardening
+### Phase 7: Later Hardening
 
 - Add request timeouts, body-size limits, and configurable upstream retry
   behavior where MCP semantics permit it.

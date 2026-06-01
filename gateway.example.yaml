@@ -3,6 +3,30 @@ server:
   port: 8788
   logLevel: info
 
+diagnostics:
+  # Diagnostics expose configured route names. Keep disabled unless a local
+  # GATEWAY_DIAGNOSTICS_TOKEN is provided to the container.
+  enabled: false
+  tokenEnv: GATEWAY_DIAGNOSTICS_TOKEN
+
+security:
+  # Add the LAN address or public MCP hostname used to reach this gateway.
+  allowedHosts:
+    - localhost
+    - 127.0.0.1
+  # Leave empty unless requests arrive through a reviewed reverse proxy.
+  trustedProxies: []
+  allowPrivateUpstreamsOnly: true
+  bodyLimitBytes: 1048576
+  jsonResponseLimitBytes: 4194304
+  maxConcurrentRequests: 100
+  maxConcurrentStreams: 20
+  sseMaxDurationMs: 300000
+  upstreamConnectTimeoutMs: 5000
+  upstreamHeadersTimeoutMs: 10000
+  upstreamBodyTimeoutMs: 30000
+  upstreamResponseHeaderLimitBytes: 16384
+
 tools:
   # Glob patterns are case-insensitive. Dangerous tool names are denied by
   # default, including shell, exec, write, delete, restart, stop, start,

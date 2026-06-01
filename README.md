@@ -26,7 +26,7 @@ backends to untrusted clients.
 
 > **Security warning:** `v0.1.0` is a LAN-only development baseline. Do not
 > expose MCP routes through Cloudflare Tunnel until the OAuth and security
-> gates in [`ProjectSpec.md`](./ProjectSpec.md) are complete.
+> phases in [`ProjectSpec.md`](./ProjectSpec.md) are complete.
 
 The next milestone adds ChatGPT-compatible OAuth and an optional configuration
 web page on a separate LAN-only administration listener. The administration
@@ -46,6 +46,17 @@ server:
   port: 8788
   logLevel: info
 
+diagnostics:
+  enabled: false
+  tokenEnv: GATEWAY_DIAGNOSTICS_TOKEN
+
+security:
+  allowedHosts:
+    - localhost
+    - 127.0.0.1
+  trustedProxies: []
+  allowPrivateUpstreamsOnly: true
+
 tools:
   defaultDenyDangerousTools: true
   allow: []
@@ -63,6 +74,12 @@ rules win over allow rules. To explicitly expose a dangerous tool, first set
 The gateway filters JSON `tools/list` responses. SSE responses are streamed
 unchanged, but denied `tools/call` requests are always blocked before reaching
 the upstream server.
+
+The default security configuration accepts local host headers, trusts no
+reverse proxies, limits request sizes and stream lifetimes, and permits only
+private-network MCP upstreams. Add deployment-specific hostnames explicitly.
+Optional `/diagnostics` output is disabled unless configured with a local
+`GATEWAY_DIAGNOSTICS_TOKEN` containing at least 32 characters.
 
 ## Local Development
 
@@ -153,6 +170,18 @@ Pull the latest release on Unraid with:
 ```bash
 docker pull ghcr.io/x10send/mcp-edge-gateway:latest
 ```
+
+For reviewed deployments, pin the immutable digest emitted by the release
+workflow instead of relying only on a mutable tag:
+
+```bash
+docker pull ghcr.io/x10send/mcp-edge-gateway@sha256:<release-digest>
+gh attestation verify \
+  oci://ghcr.io/x10send/mcp-edge-gateway@sha256:<release-digest> \
+  --repo x10send/mcp-edge-gateway
+```
+
+Release images include an SBOM and GitHub build-provenance attestation.
 
 ## Cloudflare Tunnel
 

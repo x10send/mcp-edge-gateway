@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { isIP } from "node:net";
 import { resolve } from "node:path";
 import { parse } from "yaml";
 
@@ -14,12 +15,34 @@ export interface RouteConfig {
   tools?: ToolPolicyConfig;
 }
 
+export interface SecurityConfig {
+  allowedHosts: string[];
+  trustedProxies: string[];
+  allowPrivateUpstreamsOnly: boolean;
+  bodyLimitBytes: number;
+  jsonResponseLimitBytes: number;
+  maxConcurrentRequests: number;
+  maxConcurrentStreams: number;
+  sseMaxDurationMs: number;
+  upstreamConnectTimeoutMs: number;
+  upstreamHeadersTimeoutMs: number;
+  upstreamBodyTimeoutMs: number;
+  upstreamResponseHeaderLimitBytes: number;
+}
+
+export interface DiagnosticsConfig {
+  enabled: boolean;
+  tokenEnv: string;
+}
+
 export interface GatewayConfig {
   server: {
     host: string;
     port: number;
     logLevel: string;
   };
+  diagnostics: DiagnosticsConfig;
+  security: SecurityConfig;
   tools: ToolPolicyConfig;
   routes: RouteConfig[];
 }
@@ -37,8 +60,10 @@ export function loadConfig(
   }
 
   const server = isRecord(rawConfig.server) ? rawConfig.server : {};
+  const diagnostics = parseDiagnostics(rawConfig.diagnostics);
+  const security = parseSecurity(rawConfig.security);
   const tools = parseToolPolicy(rawConfig.tools, "tools");
-  const routes = parseRoutes(rawConfig.routes);
+  const routes = parseRoutes(rawConfig.routes, security);
 
   return {
     server: {
@@ -46,12 +71,14 @@ export function loadConfig(
       port: readPort(server.port, "server.port", 8788),
       logLevel: readString(server.logLevel, "server.logLevel", "info"),
     },
+    diagnostics,
+    security,
     tools,
     routes,
   };
 }
 
-function parseRoutes(value: unknown): RouteConfig[] {
+function parseRoutes(value: unknown, security: SecurityConfig): RouteConfig[] {
   if (!Array.isArray(value) || value.length === 0) {
     throw new Error("routes must be a non-empty array");
   }
@@ -77,6 +104,21 @@ function parseRoutes(value: unknown): RouteConfig[] {
     if (!["http:", "https:"].includes(upstreamUrl.protocol)) {
       throw new Error(`routes[${index}].upstream must use http or https`);
     }
+    if (upstreamUrl.username || upstreamUrl.password) {
+      throw new Error(`routes[${index}].upstream must not contain credentials`);
+    }
+    if (upstreamUrl.hash) {
+      throw new Error(`routes[${index}].upstream must not contain a fragment`);
+    }
+    if (
+      security.allowPrivateUpstreamsOnly &&
+      isIpAddress(upstreamUrl.hostname) &&
+      !isPrivateNetworkAddress(upstreamUrl.hostname)
+    ) {
+      throw new Error(
+        `routes[${index}].upstream IP address must be on a private network`,
+      );
+    }
 
     return {
       path,
@@ -87,6 +129,118 @@ function parseRoutes(value: unknown): RouteConfig[] {
           : parseToolPolicy(route.tools, `routes[${index}].tools`),
     };
   });
+}
+
+function parseDiagnostics(value: unknown): DiagnosticsConfig {
+  if (value !== undefined && !isRecord(value)) {
+    throw new Error("diagnostics must be an object");
+  }
+  const diagnostics = value ?? {};
+
+  return {
+    enabled: readBoolean(
+      diagnostics.enabled,
+      "diagnostics.enabled",
+      false,
+    ) as boolean,
+    tokenEnv: readString(
+      diagnostics.tokenEnv,
+      "diagnostics.tokenEnv",
+      "GATEWAY_DIAGNOSTICS_TOKEN",
+    ),
+  };
+}
+
+function parseSecurity(value: unknown): SecurityConfig {
+  if (value !== undefined && !isRecord(value)) {
+    throw new Error("security must be an object");
+  }
+  const security = value ?? {};
+
+  const allowedHosts = readStringArray(
+    security.allowedHosts,
+    "security.allowedHosts",
+    ["localhost", "127.0.0.1"],
+  ) as string[];
+  if (allowedHosts.length === 0) {
+    throw new Error("security.allowedHosts must contain at least one hostname");
+  }
+  allowedHosts.forEach(validateAllowedHost);
+
+  return {
+    allowedHosts,
+    trustedProxies: readStringArray(
+      security.trustedProxies,
+      "security.trustedProxies",
+      [],
+    ) as string[],
+    allowPrivateUpstreamsOnly: readBoolean(
+      security.allowPrivateUpstreamsOnly,
+      "security.allowPrivateUpstreamsOnly",
+      true,
+    ) as boolean,
+    bodyLimitBytes: readPositiveInteger(
+      security.bodyLimitBytes,
+      "security.bodyLimitBytes",
+      1_048_576,
+    ),
+    jsonResponseLimitBytes: readPositiveInteger(
+      security.jsonResponseLimitBytes,
+      "security.jsonResponseLimitBytes",
+      4_194_304,
+    ),
+    maxConcurrentRequests: readPositiveInteger(
+      security.maxConcurrentRequests,
+      "security.maxConcurrentRequests",
+      100,
+    ),
+    maxConcurrentStreams: readPositiveInteger(
+      security.maxConcurrentStreams,
+      "security.maxConcurrentStreams",
+      20,
+    ),
+    sseMaxDurationMs: readPositiveInteger(
+      security.sseMaxDurationMs,
+      "security.sseMaxDurationMs",
+      300_000,
+    ),
+    upstreamConnectTimeoutMs: readPositiveInteger(
+      security.upstreamConnectTimeoutMs,
+      "security.upstreamConnectTimeoutMs",
+      5_000,
+    ),
+    upstreamHeadersTimeoutMs: readPositiveInteger(
+      security.upstreamHeadersTimeoutMs,
+      "security.upstreamHeadersTimeoutMs",
+      10_000,
+    ),
+    upstreamBodyTimeoutMs: readPositiveInteger(
+      security.upstreamBodyTimeoutMs,
+      "security.upstreamBodyTimeoutMs",
+      30_000,
+    ),
+    upstreamResponseHeaderLimitBytes: readPositiveInteger(
+      security.upstreamResponseHeaderLimitBytes,
+      "security.upstreamResponseHeaderLimitBytes",
+      16_384,
+    ),
+  };
+}
+
+function validateAllowedHost(hostname: string): void {
+  const normalized = stripIpv6Brackets(hostname);
+  if (
+    hostname !== hostname.trim() ||
+    hostname.includes("://") ||
+    hostname.includes("/") ||
+    hostname.includes("?") ||
+    hostname.includes("#") ||
+    (normalized.includes(":") && isIP(normalized) !== 6)
+  ) {
+    throw new Error(
+      "security.allowedHosts entries must be hostnames or IP addresses without ports",
+    );
+  }
 }
 
 function parseToolPolicy(value: unknown, field: string): ToolPolicyConfig {
@@ -131,9 +285,13 @@ function readPort(value: unknown, field: string, fallback: number): number {
   return value as number;
 }
 
-function readStringArray(value: unknown, field: string): string[] | undefined {
+function readStringArray(
+  value: unknown,
+  field: string,
+  fallback?: string[],
+): string[] | undefined {
   if (value === undefined) {
-    return undefined;
+    return fallback;
   }
   if (
     !Array.isArray(value) ||
@@ -144,14 +302,64 @@ function readStringArray(value: unknown, field: string): string[] | undefined {
   return value;
 }
 
-function readBoolean(value: unknown, field: string): boolean | undefined {
+function readBoolean(
+  value: unknown,
+  field: string,
+  fallback?: boolean,
+): boolean | undefined {
   if (value === undefined) {
-    return undefined;
+    return fallback;
   }
   if (typeof value !== "boolean") {
     throw new Error(`${field} must be a boolean`);
   }
   return value;
+}
+
+function readPositiveInteger(
+  value: unknown,
+  field: string,
+  fallback: number,
+): number {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (!Number.isInteger(value) || (value as number) < 1) {
+    throw new Error(`${field} must be a positive integer`);
+  }
+  return value as number;
+}
+
+function isIpAddress(hostname: string): boolean {
+  return isIP(stripIpv6Brackets(hostname)) !== 0;
+}
+
+export function isPrivateNetworkAddress(address: string): boolean {
+  const normalizedAddress = stripIpv6Brackets(address);
+  if (normalizedAddress.includes(":")) {
+    const normalized = normalizedAddress.toLowerCase();
+    return normalized.startsWith("fc") || normalized.startsWith("fd");
+  }
+
+  const octets = normalizedAddress.split(".").map(Number);
+  if (
+    octets.length !== 4 ||
+    octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)
+  ) {
+    return false;
+  }
+
+  return (
+    octets[0] === 10 ||
+    (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+    (octets[0] === 192 && octets[1] === 168)
+  );
+}
+
+function stripIpv6Brackets(value: string): string {
+  return value.startsWith("[") && value.endsWith("]")
+    ? value.slice(1, -1)
+    : value;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

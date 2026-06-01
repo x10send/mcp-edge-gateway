@@ -19,7 +19,7 @@ for every pull request and push to `main`. CI also builds the Docker image.
 `npm run test:coverage` enforces at least 90% line coverage, 75% branch
 coverage, and 90% function coverage across the testable application modules.
 `src/server.ts` is a thin process bootstrap and is excluded from the coverage
-gate.
+threshold.
 
 Changes to proxy behavior must add or update tests. At minimum, preserve
 coverage for health reporting, MCP session headers, query strings, SSE relay,
