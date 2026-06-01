@@ -473,6 +473,16 @@ Authentication and administration changes require regression coverage for:
 Complete the implementation phases above in order. Phase 0 is implemented on
 `main`. Phases 1 through 5 remain required before external MCP exposure.
 
+CodeQL is checked in but manual while the repository remains private because
+GitHub requires Advanced Security for private-repository result uploads. Enable
+its automatic triggers when the repository becomes public or Advanced Security
+is available.
+
+Required `main` branch protection is also pending the public transition or a
+GitHub plan that supports protection rules for private repositories. The target
+required checks are `check`, `docker-build`, and `secret-scan`, with CodeQL
+added after automatic CodeQL triggers are enabled.
+
 ### Phase 6: Backend Expansion
 
 - Add local route configuration for Home Assistant, Hubitat, and Plex MCP

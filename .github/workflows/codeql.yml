@@ -1,11 +1,9 @@
 name: CodeQL
 
 on:
-  push:
-    branches: ["main"]
-  pull_request:
-  schedule:
-    - cron: "23 8 * * 1"
+  # Enable push, pull_request, and schedule triggers when this repository is
+  # public or GitHub Advanced Security is available for the private repository.
+  workflow_dispatch:
 
 permissions:
   contents: read

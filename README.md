@@ -183,6 +183,13 @@ gh attestation verify \
 
 Release images include an SBOM and GitHub build-provenance attestation.
 
+The checked-in CodeQL workflow is manual while the repository remains private.
+Enable its push, pull-request, and scheduled triggers when the repository is
+public or GitHub Advanced Security is available.
+
+Required branch-protection checks are also pending the public transition or a
+GitHub plan that supports protection rules for private repositories.
+
 ## Cloudflare Tunnel
 
 The following is a future deployment step. Do not enable it for `v0.1.0`.
