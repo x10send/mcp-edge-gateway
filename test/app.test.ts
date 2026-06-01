@@ -115,14 +115,14 @@ test("diagnostics require a configured bearer token", async () => {
       ...config,
       diagnostics: { enabled: true, tokenEnv: "TEST_DIAGNOSTICS_TOKEN" },
     },
-    { env: { TEST_DIAGNOSTICS_TOKEN: "diagnostic-secret-with-32-characters" } },
+    { env: { TEST_DIAGNOSTICS_TOKEN: "00000000000000000000000000000000" } },
   );
 
   const denied = await app.inject({ method: "GET", url: "/diagnostics" });
   const allowed = await app.inject({
     method: "GET",
     url: "/diagnostics",
-    headers: { authorization: "Bearer diagnostic-secret-with-32-characters" },
+    headers: { authorization: "Bearer 00000000000000000000000000000000" },
   });
 
   assert.equal(denied.statusCode, 401);

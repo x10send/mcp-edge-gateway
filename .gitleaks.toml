@@ -1,8 +1,0 @@
-[extend]
-useDefault = true
-
-[allowlist]
-description = "Synthetic diagnostics token used by a startup validation test"
-regexes = [
-  '''diagnostic-secret-with-32-characters''',
-]
