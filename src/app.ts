@@ -631,11 +631,14 @@ function hasBearerToken(
   header: string | undefined,
   expectedToken: string,
 ): boolean {
-  if (!header?.startsWith("Bearer ")) {
+  // RFC 7235 §2.1: auth-scheme is case-insensitive
+  if (!header || !/^bearer /i.test(header)) {
     return false;
   }
 
-  const actualHash = createHash("sha256").update(header.slice(7)).digest();
+  const actualHash = createHash("sha256")
+    .update(header.slice(header.indexOf(" ") + 1))
+    .digest();
   const expectedHash = createHash("sha256").update(expectedToken).digest();
   return timingSafeEqual(actualHash, expectedHash);
 }

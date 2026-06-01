@@ -179,6 +179,49 @@ test("diagnostics reject weak bearer tokens at startup", () => {
   );
 });
 
+test("diagnostics accept lowercase 'bearer' scheme (RFC 7235 case-insensitive)", async () => {
+  const token = "00000000000000000000000000000000";
+  const app = buildApp(
+    {
+      ...config,
+      diagnostics: { enabled: true, tokenEnv: "TEST_DIAGNOSTICS_TOKEN" },
+    },
+    { env: { TEST_DIAGNOSTICS_TOKEN: token } },
+  );
+
+  const res = await app.inject({
+    method: "GET",
+    url: "/diagnostics",
+    headers: { authorization: `bearer ${token}` },
+  });
+
+  assert.equal(
+    res.statusCode,
+    200,
+    "lowercase 'bearer' must be accepted per RFC 7235 §2.1",
+  );
+  await app.close();
+});
+
+test("diagnostics reject wrong token", async () => {
+  const app = buildApp(
+    {
+      ...config,
+      diagnostics: { enabled: true, tokenEnv: "TEST_DIAGNOSTICS_TOKEN" },
+    },
+    { env: { TEST_DIAGNOSTICS_TOKEN: "00000000000000000000000000000000" } },
+  );
+
+  const res = await app.inject({
+    method: "GET",
+    url: "/diagnostics",
+    headers: { authorization: "Bearer wrongtoken_00000000000000000000" },
+  });
+
+  assert.equal(res.statusCode, 401);
+  await app.close();
+});
+
 test("body limit rejects oversized requests", async () => {
   const app = buildApp({
     ...config,
