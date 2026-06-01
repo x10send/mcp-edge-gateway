@@ -35,6 +35,15 @@ export interface DiagnosticsConfig {
   tokenEnv: string;
 }
 
+export interface AdminConfig {
+  enabled: boolean;
+  port: number;
+  host: string;
+  sessionTtlSeconds: number;
+  maxLoginAttemptsPerHour: number;
+  loginLockoutSeconds: number;
+}
+
 export interface GatewayConfig {
   server: {
     host: string;
@@ -42,6 +51,7 @@ export interface GatewayConfig {
     logLevel: string;
   };
   diagnostics: DiagnosticsConfig;
+  admin: AdminConfig;
   security: SecurityConfig;
   tools: ToolPolicyConfig;
   routes: RouteConfig[];
@@ -61,6 +71,7 @@ export function loadConfig(
 
   const server = isRecord(rawConfig.server) ? rawConfig.server : {};
   const diagnostics = parseDiagnostics(rawConfig.diagnostics);
+  const admin = parseAdmin(rawConfig.admin);
   const security = parseSecurity(rawConfig.security);
   const tools = parseToolPolicy(rawConfig.tools, "tools");
   const routes = parseRoutes(rawConfig.routes, security);
@@ -72,6 +83,7 @@ export function loadConfig(
       logLevel: readString(server.logLevel, "server.logLevel", "info"),
     },
     diagnostics,
+    admin,
     security,
     tools,
     routes,
@@ -94,6 +106,17 @@ function parseRoutes(value: unknown, security: SecurityConfig): RouteConfig[] {
 
     if (!path.startsWith("/")) {
       throw new Error(`routes[${index}].path must start with /`);
+    }
+    if (path === "/") {
+      throw new Error(`routes[${index}].path must not be the root path`);
+    }
+    if (path.endsWith("/")) {
+      throw new Error(`routes[${index}].path must not end with /`);
+    }
+    if (/\/(mcp|sse|messages)$/i.test(path)) {
+      throw new Error(
+        `routes[${index}].path must be a base prefix such as /unraid, not a transport path such as /unraid/mcp`,
+      );
     }
     if (seenPaths.has(path)) {
       throw new Error(`Duplicate route path: ${path}`);
@@ -147,6 +170,41 @@ function parseDiagnostics(value: unknown): DiagnosticsConfig {
       diagnostics.tokenEnv,
       "diagnostics.tokenEnv",
       "GATEWAY_DIAGNOSTICS_TOKEN",
+    ),
+  };
+}
+
+function parseAdmin(value: unknown): AdminConfig {
+  if (value !== undefined && !isRecord(value)) {
+    throw new Error("admin must be an object");
+  }
+  const admin = value ?? {};
+
+  const port = readPort(admin.port, "admin.port", 8789);
+  if (port === 8788) {
+    throw new Error(
+      "admin.port must not be the same as the public listener port",
+    );
+  }
+
+  return {
+    enabled: readBoolean(admin.enabled, "admin.enabled", false) as boolean,
+    port,
+    host: readString(admin.host, "admin.host", "127.0.0.1"),
+    sessionTtlSeconds: readPositiveInteger(
+      admin.sessionTtlSeconds,
+      "admin.sessionTtlSeconds",
+      28_800,
+    ),
+    maxLoginAttemptsPerHour: readPositiveInteger(
+      admin.maxLoginAttemptsPerHour,
+      "admin.maxLoginAttemptsPerHour",
+      10,
+    ),
+    loginLockoutSeconds: readPositiveInteger(
+      admin.loginLockoutSeconds,
+      "admin.loginLockoutSeconds",
+      900,
     ),
   };
 }
