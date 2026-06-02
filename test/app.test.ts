@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import test from "node:test";
+import { errors as undiciErrors } from "undici";
 import {
   buildApp,
   LOGGER_REDACT_PATHS,
@@ -317,6 +318,32 @@ test("proxy applies configured upstream timeouts and dispatcher", async () => {
     config.security.upstreamBodyTimeoutMs,
   );
   assert.ok(requestOptions?.dispatcher);
+  await app.close();
+});
+
+test("proxy returns 504 when upstream headers time out", async () => {
+  const sendUpstream = (() => {
+    throw new undiciErrors.HeadersTimeoutError();
+  }) as SendUpstream;
+  const app = buildApp(config, { sendUpstream });
+
+  const response = await app.inject({ method: "POST", url: "/unraid/mcp" });
+
+  assert.equal(response.statusCode, 504);
+  assert.equal(response.json().error, "Upstream timed out");
+  await app.close();
+});
+
+test("proxy returns 502 when upstream connection fails", async () => {
+  const sendUpstream = (() => {
+    throw new undiciErrors.SocketError("connection reset", "socket");
+  }) as SendUpstream;
+  const app = buildApp(config, { sendUpstream });
+
+  const response = await app.inject({ method: "POST", url: "/unraid/mcp" });
+
+  assert.equal(response.statusCode, 502);
+  assert.equal(response.json().error, "Upstream unavailable");
   await app.close();
 });
 

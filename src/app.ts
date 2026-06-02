@@ -4,7 +4,11 @@ import type { DatabaseSync } from "node:sqlite";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import fastifyCookie from "@fastify/cookie";
 import fastifyFormbody from "@fastify/formbody";
-import { request as defaultSendUpstream, type Dispatcher } from "undici";
+import {
+  errors as undiciErrors,
+  request as defaultSendUpstream,
+  type Dispatcher,
+} from "undici";
 import type { GatewayConfig, UpstreamAuthConfig } from "./config.js";
 import { hasScope, lookupToken } from "./oauth-token-store.js";
 import {
@@ -437,14 +441,26 @@ function createProxyHandler(
     }
 
     // undici default maxRedirections is 0; redirects are never followed.
-    const upstream = await sendUpstream(targetUrl, {
-      method: request.method as Dispatcher.HttpMethod,
-      headers: upstreamHeaders,
-      body,
-      headersTimeout: config.security.upstreamHeadersTimeoutMs,
-      bodyTimeout: config.security.upstreamBodyTimeoutMs,
-      dispatcher: upstreamDispatcher,
-    });
+    let upstream: Dispatcher.ResponseData;
+    try {
+      upstream = await sendUpstream(targetUrl, {
+        method: request.method as Dispatcher.HttpMethod,
+        headers: upstreamHeaders,
+        body,
+        headersTimeout: config.security.upstreamHeadersTimeoutMs,
+        bodyTimeout: config.security.upstreamBodyTimeoutMs,
+        dispatcher: upstreamDispatcher,
+      });
+    } catch (err) {
+      const isTimeout =
+        err instanceof undiciErrors.HeadersTimeoutError ||
+        err instanceof undiciErrors.BodyTimeoutError ||
+        err instanceof undiciErrors.ConnectTimeoutError;
+      request.log.warn({ route: routePath, err }, "upstream request failed");
+      return reply.code(isTimeout ? 504 : 502).send({
+        error: isTimeout ? "Upstream timed out" : "Upstream unavailable",
+      });
+    }
 
     copyResponseHeaders(upstream.headers, reply);
     reply.code(upstream.statusCode);
