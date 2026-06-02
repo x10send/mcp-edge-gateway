@@ -17,9 +17,9 @@ token list, active tokens you did not issue.
 2. If you cannot reach the admin UI, revoke directly in the database:
 
    ```bash
-   sqlite3 /mnt/user/appdata/mcp-edge-gateway/config/state/gateway.db \
+   sqlite3 /mnt/user/appdata/mcp-edge-gateway/state/gateway.db \
      "UPDATE oauth_tokens SET revoked_at = unixepoch() WHERE revoked_at IS NULL;"
-   sqlite3 /mnt/user/appdata/mcp-edge-gateway/config/state/gateway.db \
+   sqlite3 /mnt/user/appdata/mcp-edge-gateway/state/gateway.db \
      "UPDATE oauth_refresh_tokens SET revoked_at = unixepoch() WHERE revoked_at IS NULL;"
    ```
 
@@ -33,7 +33,7 @@ token list, active tokens you did not issue.
 3. Review audit events in `state/gateway.db`:
 
    ```bash
-   sqlite3 /mnt/user/appdata/mcp-edge-gateway/config/state/gateway.db \
+   sqlite3 /mnt/user/appdata/mcp-edge-gateway/state/gateway.db \
      "SELECT * FROM audit_events ORDER BY created_at DESC LIMIT 50;"
    ```
 

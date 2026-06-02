@@ -49,14 +49,15 @@ routes:
 
 ## 3. Start and bootstrap
 
-Start the container, then check the logs for the one-time bootstrap credential:
+Start the container. In the Unraid Docker tab, click the container's log icon
+and look for a line like:
 
-```bash
-docker logs mcp-edge-gateway | grep BOOTSTRAP
+```
+BOOTSTRAP CREDENTIAL: <base64url string>
 ```
 
-Visit `http://your-lan-ip:8789/admin/setup`, enter the credential, and set an
-admin password (12+ characters).
+Copy that credential, visit `http://your-lan-ip:8789/admin/setup`, enter it,
+and set an admin password (12+ characters).
 
 ## 4. Set the OAuth password
 

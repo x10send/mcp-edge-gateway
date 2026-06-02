@@ -137,70 +137,25 @@ That confirms the request reached the upstream MCP endpoint.
 
 ## Deploy on Unraid
 
-Create the config directory and place the YAML file there:
-
-```bash
-mkdir -p /mnt/user/appdata/mcp-edge-gateway
-cp gateway.example.yaml /mnt/user/appdata/mcp-edge-gateway/gateway.yaml
-```
-
-Create `.env` with the host-side paths (gitignored):
-
-```bash
-printf 'GATEWAY_CONFIG_DIR=/mnt/user/appdata/mcp-edge-gateway\nGATEWAY_STATE_DIR=/mnt/user/appdata/mcp-edge-gateway/state\n' > .env
-```
-
-Pull and start the published image:
-
-```bash
-docker compose up -d
-curl http://localhost:8788/health
-```
-
-To build locally from source instead, set `GATEWAY_IMAGE=` in `.env` (empty
-overrides the default image reference so Compose falls back to `build: .`):
-
-```bash
-printf 'GATEWAY_IMAGE=\n' >> .env
-docker compose up -d --build
-```
-
-After changing the YAML file, restart the container:
-
-```bash
-docker compose restart mcp-edge-gateway
-```
-
-When the administration listener is enabled:
-
-1. Set `admin.host: 0.0.0.0` in `gateway.yaml` — Docker's port forwarding
-   cannot reach a container service bound only to `127.0.0.1`.
-2. Mount `/config` read-write so atomic YAML replacement and backups work.
-3. Set `GATEWAY_ADMIN_BIND_ADDRESS` to your Unraid host's LAN IP so the admin
-   UI is reachable from a browser on your LAN:
-
-```bash
-printf 'GATEWAY_ADMIN_BIND_ADDRESS=192.168.1.x\n' >> .env   # replace with your Unraid LAN IP
-docker compose -f docker-compose.yml -f docker-compose.admin.yml up -d
-```
-
-Keep the admin bind address LAN-only. Do not forward port `8789` through
-Cloudflare Tunnel.
+See [`docs/INSTALLATION.md`](./docs/INSTALLATION.md) for the full walkthrough.
+The short version: add the container via **Docker → Add Container**, map the
+two paths and two ports from the table in the installation guide, drop a
+`gateway.yaml` in the config directory, and start it.
 
 ## Container Releases
 
 Version tags publish container images to GitHub Container Registry:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.4
+git push origin v0.2.4
 ```
 
 The release workflow publishes:
 
 ```text
-ghcr.io/x10send/mcp-edge-gateway:0.1.0
-ghcr.io/x10send/mcp-edge-gateway:0.1
+ghcr.io/x10send/mcp-edge-gateway:0.2.4
+ghcr.io/x10send/mcp-edge-gateway:0.2
 ghcr.io/x10send/mcp-edge-gateway:0
 ghcr.io/x10send/mcp-edge-gateway:latest
 ```
