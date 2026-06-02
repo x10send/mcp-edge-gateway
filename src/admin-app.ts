@@ -398,7 +398,7 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
   void app.register(fastifyCookie);
   void app.register(fastifyFormbody);
 
-  app.addHook("onSend", async (_req, reply) => {
+  app.addHook("onSend", async (req, reply) => {
     reply.header("X-Frame-Options", "DENY");
     reply.header("X-Content-Type-Options", "nosniff");
     reply.header("Referrer-Policy", "no-referrer");
@@ -406,7 +406,9 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
       "Content-Security-Policy",
       "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'",
     );
-    reply.header("Cache-Control", "no-store");
+    if (!req.url?.startsWith("/admin/static/")) {
+      reply.header("Cache-Control", "no-store");
+    }
   });
 
   // ── Auth helpers ─────────────────────────────────────────────────────────

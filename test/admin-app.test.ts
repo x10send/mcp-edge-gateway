@@ -1136,3 +1136,263 @@ test("POST /admin/settings requires CSRF token", async () => {
     await ctx.cleanup();
   }
 });
+
+// ── Static assets ─────────────────────────────────────────────────────────────
+
+test("GET /admin/static/htmx.min.js returns htmx JavaScript", async () => {
+  const ctx = setupTest();
+  try {
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/admin/static/htmx.min.js",
+    });
+    assert.equal(res.statusCode, 200);
+    assert.ok(
+      (res.headers["content-type"] as string).includes("javascript"),
+      "content-type should be JavaScript",
+    );
+    assert.ok(res.body.length > 1000, "htmx bundle should not be empty");
+    assert.ok(
+      res.headers["cache-control"]?.includes("max-age"),
+      "static asset should have long cache",
+    );
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// ── Theme toggle ──────────────────────────────────────────────────────────────
+
+test("GET /admin/theme/dark sets the theme cookie and redirects", async () => {
+  const ctx = setupTest();
+  try {
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/admin/theme/dark",
+    });
+    assert.equal(res.statusCode, 302);
+    const setCookie = res.headers["set-cookie"] as string;
+    assert.ok(
+      setCookie?.includes("mcp_admin_theme=dark"),
+      "should set dark theme cookie",
+    );
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("GET /admin/theme/light sets the theme cookie and redirects", async () => {
+  const ctx = setupTest();
+  try {
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/admin/theme/light",
+    });
+    assert.equal(res.statusCode, 302);
+    const setCookie = res.headers["set-cookie"] as string;
+    assert.ok(
+      setCookie?.includes("mcp_admin_theme=light"),
+      "should set light theme cookie",
+    );
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("GET /admin/theme/auto clears the theme cookie and redirects", async () => {
+  const ctx = setupTest();
+  try {
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/admin/theme/auto",
+    });
+    assert.equal(res.statusCode, 302);
+    const setCookie = res.headers["set-cookie"] as string;
+    assert.ok(
+      setCookie?.includes("mcp_admin_theme=;") ||
+        setCookie?.includes("mcp_admin_theme=,"),
+      "should clear theme cookie",
+    );
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("GET /admin/theme/:invalid redirects to dashboard without setting cookie", async () => {
+  const ctx = setupTest();
+  try {
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/admin/theme/invalid-mode",
+    });
+    assert.equal(res.statusCode, 302);
+    assert.ok((res.headers.location as string).includes("/admin/dashboard"));
+    assert.ok(
+      !(res.headers["set-cookie"] as string | undefined)?.includes(
+        "mcp_admin_theme=invalid",
+      ),
+      "should not set invalid theme",
+    );
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("GET /admin/theme/dark redirects safely using Referer header", async () => {
+  const ctx = setupTest();
+  try {
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/admin/theme/dark",
+      headers: { referer: "http://localhost:8789/admin/tokens" },
+    });
+    assert.equal(res.statusCode, 302);
+    assert.ok((res.headers.location as string).includes("/admin/tokens"));
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("GET /admin/theme/dark ignores external Referer and falls back to dashboard", async () => {
+  const ctx = setupTest();
+  try {
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/admin/theme/dark",
+      headers: { referer: "https://evil.example.com/steal" },
+    });
+    assert.equal(res.statusCode, 302);
+    assert.ok((res.headers.location as string).includes("/admin/dashboard"));
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// ── HTMX endpoints ────────────────────────────────────────────────────────────
+
+test("POST /admin/config/preview returns HTML fragment when HX-Request header is present", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie, csrfToken } = await doSetup(ctx);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/config/preview",
+      payload: `_csrf=${encodeURIComponent(csrfToken)}&yaml=${encodeURIComponent(VALID_YAML)}`,
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie,
+        "hx-request": "true",
+      },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.ok(
+      res.body.includes("valid"),
+      "fragment should include validation result",
+    );
+    // Should be a fragment, not a full page
+    assert.ok(
+      !res.body.includes("<!DOCTYPE"),
+      "should return fragment, not full page",
+    );
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("POST /admin/config/preview returns error fragment for invalid YAML via HTMX", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie, csrfToken } = await doSetup(ctx);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/config/preview",
+      payload: `_csrf=${encodeURIComponent(csrfToken)}&yaml=${encodeURIComponent("routes: not-an-array")}`,
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie,
+        "hx-request": "true",
+      },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.ok(res.body.includes("✗"), "fragment should include error marker");
+    assert.ok(
+      !res.body.includes("<!DOCTYPE"),
+      "should return fragment, not full page",
+    );
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("POST /admin/routes/:path/discover returns HTML fragment when HX-Request header is present", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie, csrfToken } = await doSetup(ctx);
+    // Seed the tool cache so discover returns something
+    ctx.db
+      .prepare(
+        "INSERT INTO route_tool_cache (route_path, tool_name, description) VALUES (?, ?, ?)",
+      )
+      .run("/unraid", "get_status", "Get status");
+
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: `/admin/routes${encodeURIComponent("/unraid")}/discover`,
+      payload: `_csrf=${encodeURIComponent(csrfToken)}`,
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie,
+        "hx-request": "true",
+      },
+    });
+    // Discovery against a non-existent upstream returns empty tools — should still be a fragment
+    assert.equal(res.statusCode, 200);
+    assert.ok(
+      !res.body.includes("<!DOCTYPE"),
+      "should return fragment, not full page",
+    );
+    assert.ok(
+      res.body.includes("tools-table"),
+      "fragment should include tools-table id",
+    );
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// ── Restart ───────────────────────────────────────────────────────────────────
+
+test("POST /admin/restart requires authentication", async () => {
+  const ctx = setupTest();
+  try {
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/restart",
+      payload: "",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+    });
+    assert.equal(res.statusCode, 302);
+    assert.ok((res.headers.location as string).includes("/admin/login"));
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("POST /admin/restart requires CSRF token", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie } = await doSetup(ctx);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/restart",
+      payload: "",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie,
+      },
+    });
+    assert.equal(res.statusCode, 403);
+  } finally {
+    await ctx.cleanup();
+  }
+});
