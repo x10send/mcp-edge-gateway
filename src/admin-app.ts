@@ -158,6 +158,8 @@ pre{font-family:ui-monospace,'Cascadia Code','Fira Code',monospace;background:va
 .btn-danger:hover{background:var(--danger-h);border-color:var(--danger-h)}
 .btn-danger-outline{background:transparent;border-color:var(--danger);color:var(--danger)}
 .btn-danger-outline:hover{background:var(--danger);color:#fff}
+.btn-warning{background:var(--warning);color:#fff;border-color:var(--warning)}
+.btn-warning:hover{background:color-mix(in srgb,var(--warning) 85%,#000);border-color:color-mix(in srgb,var(--warning) 85%,#000)}
 .btn-sm{padding:.25rem .6rem;font-size:.8rem}
 .btn-group{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
 /* Badges */
@@ -286,7 +288,7 @@ function htmlShell(
         <span>⚠ Configuration saved — restart required to apply changes</span>
         <form method="POST" action="/admin/restart" style="display:inline">
           <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(csrf)}">
-          <button type="submit" class="btn btn-sm btn-warning" style="background:var(--warning);color:#fff;border-color:var(--warning)">Restart now</button>
+          <button type="submit" class="btn btn-sm btn-warning">Restart now</button>
         </form>
       </div>`
     : "";
@@ -324,7 +326,12 @@ ${restartBanner}${body}
 </html>`;
 }
 
-function htmlAuth(title: string, body: string, theme: string): string {
+function htmlAuth(
+  title: string,
+  body: string,
+  theme: string,
+  headExtra = "",
+): string {
   const themeAttr = theme ? ` data-theme="${escapeHtml(theme)}"` : "";
   return `<!DOCTYPE html>
 <html lang="en"${themeAttr}>
@@ -333,7 +340,7 @@ function htmlAuth(title: string, body: string, theme: string): string {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(title)} — MCP Gateway</title>
 <style>${ADMIN_CSS}</style>
-</head>
+${headExtra}</head>
 <body>
 <div class="auth-wrap">
 <div class="auth-card">
@@ -837,28 +844,23 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
           </div>
         </div>
         <div class="card">
-          <form method="POST" action="/admin/config/preview"
-                hx-post="/admin/config/preview"
-                hx-target="#preview-result"
-                hx-swap="innerHTML"
-                hx-include="[name=yaml],[name=${CSRF_FIELD}]"
-                id="config-form">
+          <form method="POST" action="/admin/config" id="config-form">
             <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(session.csrfToken)}">
             <div class="form-group">
               <label class="form-label" for="yaml-editor">gateway.yaml</label>
               <textarea id="yaml-editor" name="yaml" rows="28" class="form-textarea" spellcheck="false">${escapeHtml(currentYaml)}</textarea>
             </div>
             <div class="form-actions">
-              <button type="submit" class="btn btn-secondary"
+              <button type="button" class="btn btn-secondary"
                       hx-post="/admin/config/preview"
                       hx-target="#preview-result"
                       hx-swap="innerHTML"
+                      hx-include="closest form"
                       hx-indicator="#validate-spinner">
                 <span class="htmx-indicator spinner" id="validate-spinner"></span>
                 Validate
               </button>
-              <button type="submit" class="btn btn-primary" formaction="/admin/config" form="config-form"
-                      onclick="this.form.removeAttribute('hx-post')">Save</button>
+              <button type="submit" class="btn btn-primary">Save</button>
             </div>
           </form>
           <div id="preview-result" style="margin-top:1rem"></div>
@@ -1192,11 +1194,15 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
             : status === "expired"
               ? "badge-warning"
               : "badge-muted";
+        const expiryLabel = t.expiresAt
+          ? new Date(t.expiresAt * 1000).toLocaleDateString("en-CA")
+          : "—";
         return `<tr>
           <td class="td-mono">${t.id}</td>
           <td>${escapeHtml(t.description ?? "")}</td>
           <td class="td-mono">${escapeHtml(t.scope || "(none)")}</td>
           <td class="td-mono">${escapeHtml(t.routes === "*" ? "all routes" : t.routes)}</td>
+          <td class="td-muted">${expiryLabel}</td>
           <td><span class="badge ${badgeClass}">${status}</span></td>
           <td>
             ${
@@ -1227,9 +1233,9 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
         <div class="table-wrap">
           <table>
             <thead><tr>
-              <th>ID</th><th>Description</th><th>Scope</th><th>Routes</th><th>Status</th><th>Actions</th>
+              <th>ID</th><th>Description</th><th>Scope</th><th>Routes</th><th>Expires</th><th>Status</th><th>Actions</th>
             </tr></thead>
-            <tbody>${rows || '<tr><td colspan="6"><div class="empty-state"><p>No tokens issued.</p><p><a href="/admin/tokens/new">Issue your first token →</a></p></div></td></tr>'}</tbody>
+            <tbody>${rows || '<tr><td colspan="7"><div class="empty-state"><p>No tokens issued.</p><p><a href="/admin/tokens/new">Issue your first token →</a></p></div></td></tr>'}</tbody>
           </table>
         </div>`,
         { active: "tokens", csrf: session.csrfToken, theme, restartRequired },
@@ -2054,9 +2060,9 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
         <p class="auth-subtitle">The gateway is restarting. This page will redirect automatically when it comes back online.</p>
         <div style="text-align:center;margin:1.5rem 0"><div class="spinner" style="width:2em;height:2em;border-width:3px"></div></div>
         <div id="status" hx-get="/admin/health" hx-trigger="every 2s" hx-swap="none"
-             hx-on::after-request="if(event.detail.successful){window.location='/admin/dashboard'}"></div>
-        <script src="/admin/static/htmx.min.js"></script>`,
+             hx-on::after-request="if(event.detail.successful){window.location='/admin/dashboard'}"></div>`,
         theme,
+        `<script src="/admin/static/htmx.min.js"></script>`,
       ),
     );
     setTimeout(() => process.exit(0), 500);

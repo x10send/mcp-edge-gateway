@@ -1062,6 +1062,41 @@ test("POST /admin/oauth-user stores a separate OAuth password", async () => {
   }
 });
 
+test("POST /admin/oauth-user rejects mismatched passwords", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie, csrfToken } = await doSetup(ctx);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/oauth-user",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      payload: `_csrf=${encodeURIComponent(csrfToken)}&password=correct-horse-battery&confirm=different-password-xyz`,
+    });
+    assert.equal(res.statusCode, 400);
+    assert.ok(
+      res.body.includes("12 characters") || res.body.includes("must match"),
+    );
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("POST /admin/oauth-user rejects short passwords", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie, csrfToken } = await doSetup(ctx);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/oauth-user",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      payload: `_csrf=${encodeURIComponent(csrfToken)}&password=short&confirm=short`,
+    });
+    assert.equal(res.statusCode, 400);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
 test("GET /admin/settings shows current server and admin settings", async () => {
   const ctx = setupTest();
   try {
@@ -1392,6 +1427,110 @@ test("POST /admin/restart requires CSRF token", async () => {
       },
     });
     assert.equal(res.statusCode, 403);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// ── Settings error paths ──────────────────────────────────────────────────────
+
+test("POST /admin/settings rejects conflicting server and admin ports", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie, csrfToken } = await doSetup(ctx);
+    const payload = [
+      `_csrf=${encodeURIComponent(csrfToken)}`,
+      `serverHost=0.0.0.0`,
+      `serverPort=8788`,
+      `serverLogLevel=info`,
+      `adminHost=0.0.0.0`,
+      `adminPort=8788`, // same as serverPort — conflict
+    ].join("&");
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/settings",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      payload,
+    });
+    assert.equal(res.statusCode, 400);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("POST /admin/settings rejects invalid log level", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie, csrfToken } = await doSetup(ctx);
+    const payload = [
+      `_csrf=${encodeURIComponent(csrfToken)}`,
+      `serverHost=0.0.0.0`,
+      `serverPort=8788`,
+      `serverLogLevel=verbose`, // not a valid level
+      `adminHost=0.0.0.0`,
+      `adminPort=8789`,
+    ].join("&");
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/settings",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      payload,
+    });
+    assert.equal(res.statusCode, 400);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// ── Add route error paths ─────────────────────────────────────────────────────
+
+test("POST /admin/routes rejects empty path", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie, csrfToken } = await doSetup(ctx);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/routes",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      payload: `_csrf=${encodeURIComponent(csrfToken)}&path=&upstream=http://host.local:8043&authType=`,
+    });
+    assert.equal(res.statusCode, 400);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("POST /admin/routes rejects empty upstream", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie, csrfToken } = await doSetup(ctx);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/routes",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      payload: `_csrf=${encodeURIComponent(csrfToken)}&path=%2Fnew-route&upstream=&authType=`,
+    });
+    assert.equal(res.statusCode, 400);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// ── Token expiry display ──────────────────────────────────────────────────────
+
+test("GET /admin/tokens shows expiry date for tokens with expiresAt", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie } = await doSetup(ctx);
+    const futureTs = Math.floor(Date.now() / 1000) + 7 * 86400; // 7 days from now
+    issueToken(ctx.db, { description: "expiring-token", expiresAt: futureTs });
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/admin/tokens",
+      headers: { cookie },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.ok(res.body.includes("expiring-token"));
   } finally {
     await ctx.cleanup();
   }
