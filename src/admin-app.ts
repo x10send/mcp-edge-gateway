@@ -1,6 +1,12 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+
+const APP_VERSION = (
+  JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+  ) as { version: string }
+).version;
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import fastifyCookie from "@fastify/cookie";
 import fastifyFormbody from "@fastify/formbody";
@@ -1486,6 +1492,8 @@ function htmlPage(title: string, body: string): string {
 </head>
 <body>
 ${body}
+<hr style="margin-top:3rem">
+<footer style="color:#888;font-size:.85rem">MCP Gateway v${APP_VERSION}</footer>
 </body>
 </html>`;
 }
