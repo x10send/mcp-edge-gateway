@@ -210,9 +210,3 @@ sqlite3 /mnt/user/appdata/mcp-edge-gateway/config/state/gateway.db \
 
 Then restart the container. The next start prints a new bootstrap credential.
 
----
-
-## Deployment Checklist
-
-See [`SECURE_DEPLOYMENT_CHECKLIST.md`](SECURE_DEPLOYMENT_CHECKLIST.md) for the
-complete pre-exposure checklist.

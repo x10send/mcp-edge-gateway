@@ -11,8 +11,7 @@ version, reproduction steps, impact, and any proposed mitigation.
 This gateway can reach private MCP backends. Before exposing it to untrusted
 clients:
 
-- Complete [`docs/SECURE_DEPLOYMENT_CHECKLIST.md`](./docs/SECURE_DEPLOYMENT_CHECKLIST.md).
-- Add and validate OAuth authentication.
+- Enable and validate OAuth authentication before external exposure.
 - Keep backend addresses, tunnel details, tokens, and credentials out of git.
 - Review tool allowlists and denylists for every configured backend.
 - Keep `defaultDenyDangerousTools: true` unless a deployment has a narrow,

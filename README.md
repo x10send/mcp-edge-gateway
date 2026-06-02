@@ -225,9 +225,6 @@ Release images include an SBOM and GitHub build-provenance attestation.
 
 ## Cloudflare Tunnel
 
-Complete [`docs/SECURE_DEPLOYMENT_CHECKLIST.md`](./docs/SECURE_DEPLOYMENT_CHECKLIST.md)
-before external exposure.
-
 In the Cloudflare Zero Trust dashboard, add a public hostname to the tunnel:
 
 ```text

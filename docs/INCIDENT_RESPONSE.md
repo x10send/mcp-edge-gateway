@@ -73,8 +73,8 @@ offline cracking.
 6. Revoke any existing OAuth client registrations by clearing `oauth_clients`
    (they will re-register on next connection).
 7. Issue new Bearer tokens to legitimate clients.
-8. Re-enable the Cloudflare Tunnel only after completing the full deployment
-   checklist in `SECURE_DEPLOYMENT_CHECKLIST.md`.
+8. Re-enable the Cloudflare Tunnel only after verifying OAuth, token revocation,
+   and tool policies are all functioning correctly.
 9. Record the incident scope, timeline, and recovery actions.
 
 ---
