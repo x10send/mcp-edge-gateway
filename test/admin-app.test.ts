@@ -1196,6 +1196,35 @@ test("GET /admin/static/htmx.min.js returns htmx JavaScript", async () => {
   }
 });
 
+test("GET /admin/static/admin.js returns admin JavaScript", async () => {
+  const ctx = setupTest();
+  try {
+    const res = await ctx.app.inject({
+      method: "GET",
+      url: "/admin/static/admin.js",
+    });
+    assert.equal(res.statusCode, 200);
+    assert.ok(
+      (res.headers["content-type"] as string).includes("javascript"),
+      "content-type should be JavaScript",
+    );
+    assert.ok(
+      res.body.includes("copy-btn"),
+      "should include copy button handler",
+    );
+    assert.ok(
+      res.body.includes("data-confirm"),
+      "should include confirm handler",
+    );
+    assert.ok(
+      res.headers["cache-control"]?.includes("max-age"),
+      "static asset should have long cache",
+    );
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
 // ── Theme toggle ──────────────────────────────────────────────────────────────
 
 test("GET /admin/theme/dark sets the theme cookie and redirects", async () => {

@@ -13,6 +13,25 @@ const HTMX_SOURCE = readFileSync(
   "utf8",
 );
 
+// Tiny event-delegation script: copy button, delete confirm, restart health poll.
+// Served from /admin/static/admin.js so CSP 'script-src self' allows it.
+const ADMIN_JS = `
+document.addEventListener('click',function(e){
+  var btn=e.target.closest('.copy-btn');
+  if(btn){
+    var box=btn.parentElement;
+    var node=Array.from(box.childNodes).find(function(n){return n.nodeType===3;});
+    if(node)navigator.clipboard.writeText(node.textContent.trim()).then(function(){btn.textContent='✓ Copied';});
+    return;
+  }
+  var conf=e.target.closest('[data-confirm]');
+  if(conf&&!confirm(conf.getAttribute('data-confirm')))e.preventDefault();
+});
+document.body&&document.body.addEventListener('htmx:afterRequest',function(e){
+  if(e.detail.successful&&e.target.id==='status')window.location.href='/admin/dashboard';
+});
+`.trim();
+
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import fastifyCookie from "@fastify/cookie";
 import fastifyFormbody from "@fastify/formbody";
@@ -301,6 +320,7 @@ function htmlShell(
 <title>${escapeHtml(title)} — MCP Gateway</title>
 <style>${ADMIN_CSS}</style>
 <script src="/admin/static/htmx.min.js"></script>
+<script src="/admin/static/admin.js"></script>
 </head>
 <body>
 <div class="app-layout">
@@ -488,6 +508,12 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
     reply.header("Content-Type", "application/javascript; charset=utf-8");
     reply.header("Cache-Control", "public, max-age=31536000, immutable");
     return reply.send(HTMX_SOURCE);
+  });
+
+  app.get("/admin/static/admin.js", async (_request, reply) => {
+    reply.header("Content-Type", "application/javascript; charset=utf-8");
+    reply.header("Cache-Control", "public, max-age=31536000, immutable");
+    return reply.send(ADMIN_JS);
   });
 
   // ── Theme toggle ──────────────────────────────────────────────────────────
@@ -1339,7 +1365,7 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
         </div>
         <p class="text-muted" style="font-size:.875rem"><strong>Token ID:</strong> ${id}</p>
         <div class="token-box" id="token-text">${escapeHtml(plaintext)}
-          <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('token-text').firstChild.textContent.trim()).then(()=>{this.textContent='✓ Copied'})">Copy</button>
+          <button class="copy-btn">Copy</button>
         </div>
         <div class="btn-group">
           <a href="/admin/tokens" class="btn btn-secondary btn-sm">← Back to tokens</a>
@@ -1486,7 +1512,7 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
               <form method="POST" action="/admin/routes${encodeURIComponent(r.path)}/delete" style="display:inline">
                 <input type="hidden" name="${CSRF_FIELD}" value="${escapeHtml(session.csrfToken)}">
                 <button type="submit" class="btn btn-danger-outline btn-sm"
-                        onclick="return confirm('Delete route ${escapeHtml(r.path)}?')">Delete</button>
+                        data-confirm="Delete route ${escapeHtml(r.path)}?">Delete</button>
               </form>
             </div>
           </td>
@@ -2059,10 +2085,10 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
         <h2 class="auth-title">Gateway Restarting…</h2>
         <p class="auth-subtitle">The gateway is restarting. This page will redirect automatically when it comes back online.</p>
         <div style="text-align:center;margin:1.5rem 0"><div class="spinner" style="width:2em;height:2em;border-width:3px"></div></div>
-        <div id="status" hx-get="/admin/health" hx-trigger="every 2s" hx-swap="none"
-             hx-on::after-request="if(event.detail.successful){window.location='/admin/dashboard'}"></div>`,
+        <div id="status" hx-get="/admin/health" hx-trigger="every 2s" hx-swap="none"></div>`,
         theme,
-        `<script src="/admin/static/htmx.min.js"></script>`,
+        `<script src="/admin/static/htmx.min.js"></script>
+<script src="/admin/static/admin.js"></script>`,
       ),
     );
     setTimeout(() => process.exit(0), 500);
