@@ -27,7 +27,7 @@ document.addEventListener('click',function(e){
   var conf=e.target.closest('[data-confirm]');
   if(conf&&!confirm(conf.getAttribute('data-confirm')))e.preventDefault();
 });
-document.body&&document.body.addEventListener('htmx:afterRequest',function(e){
+document.addEventListener('htmx:afterRequest',function(e){
   if(e.detail.successful&&e.target.id==='status')window.location.href='/admin/dashboard';
 });
 `.trim();
