@@ -295,6 +295,11 @@ test("ChatGPT-compatible OAuth flow: full connection from discovery to authentic
     assert.ok(tokens.access_token, "must return access_token");
     assert.ok(tokens.refresh_token, "must return refresh_token");
     assert.equal(typeof tokens.expires_in, "number");
+    assert.equal(
+      tokens.resource,
+      resource,
+      "token response must echo resource indicator",
+    );
 
     // Step 9: use the access token on the MCP endpoint
     const mcpRequest = await ctx.app.inject({

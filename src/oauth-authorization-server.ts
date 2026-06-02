@@ -547,7 +547,8 @@ function issueProtocolTokens(
     token_type: "Bearer",
     expires_in: expiresIn,
     refresh_token: refreshToken,
-    scope,
+    resource,
+    ...(scope ? { scope } : {}),
   };
 }
 
