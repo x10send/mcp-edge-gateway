@@ -452,11 +452,17 @@ function createProxyHandler(
         dispatcher: upstreamDispatcher,
       });
     } catch (err) {
+      const isHeadersTimeout = err instanceof undiciErrors.HeadersTimeoutError;
       const isTimeout =
-        err instanceof undiciErrors.HeadersTimeoutError ||
+        isHeadersTimeout ||
         err instanceof undiciErrors.BodyTimeoutError ||
         err instanceof undiciErrors.ConnectTimeoutError;
       request.log.warn({ route: routePath, err }, "upstream request failed");
+      // GET /mcp that gets no response headers means the upstream doesn't
+      // support the SSE stream endpoint — return 405 so clients fall back to POST.
+      if (isHeadersTimeout && request.method === "GET") {
+        return reply.code(405).send({ error: "Method not allowed" });
+      }
       return reply.code(isTimeout ? 504 : 502).send({
         error: isTimeout ? "Upstream timed out" : "Upstream unavailable",
       });

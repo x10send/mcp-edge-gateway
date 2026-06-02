@@ -321,7 +321,7 @@ test("proxy applies configured upstream timeouts and dispatcher", async () => {
   await app.close();
 });
 
-test("proxy returns 504 when upstream headers time out", async () => {
+test("proxy returns 504 when upstream headers time out on POST", async () => {
   const sendUpstream = (() => {
     throw new undiciErrors.HeadersTimeoutError();
   }) as SendUpstream;
@@ -331,6 +331,19 @@ test("proxy returns 504 when upstream headers time out", async () => {
 
   assert.equal(response.statusCode, 504);
   assert.equal(response.json().error, "Upstream timed out");
+  await app.close();
+});
+
+test("proxy returns 405 when upstream headers time out on GET (SSE fallback signal)", async () => {
+  const sendUpstream = (() => {
+    throw new undiciErrors.HeadersTimeoutError();
+  }) as SendUpstream;
+  const app = buildApp(config, { sendUpstream });
+
+  const response = await app.inject({ method: "GET", url: "/unraid/mcp" });
+
+  assert.equal(response.statusCode, 405);
+  assert.equal(response.json().error, "Method not allowed");
   await app.close();
 });
 
