@@ -11,13 +11,13 @@
 
 In the Unraid UI, go to **Docker → Add Container** and fill in:
 
-| Field | Value |
-|---|---|
-| Repository | `ghcr.io/x10send/mcp-edge-gateway:latest` |
-| Port | `8788:8788` (public MCP) |
-| Port | `8789:8789` (admin UI — LAN only, do not tunnel) |
-| Path | `/mnt/user/appdata/mcp-edge-gateway` → `/config` |
-| Path | `/mnt/user/appdata/mcp-edge-gateway/state` → `/config/state` |
+| Field      | Value                                                        |
+| ---------- | ------------------------------------------------------------ |
+| Repository | `ghcr.io/x10send/mcp-edge-gateway:latest`                    |
+| Port       | `8788:8788` (public MCP)                                     |
+| Port       | `8789:8789` (admin UI — LAN only, do not tunnel)             |
+| Path       | `/mnt/user/appdata/mcp-edge-gateway` → `/config`             |
+| Path       | `/mnt/user/appdata/mcp-edge-gateway/state` → `/config/state` |
 
 Set the `/config` mount to **read/write** so the admin UI can save config changes.
 
@@ -66,11 +66,13 @@ a password. This is what you'll enter when Claude.ai prompts you to log in.
 ## 5. Connect Claude.ai or Claude Code
 
 **Claude.ai:** Add a new MCP connector with your tunnel URL:
+
 ```
 https://your-subdomain.example.com/unraid/mcp
 ```
 
 **Claude Code:**
+
 ```bash
 claude mcp add --transport http https://your-subdomain.example.com/unraid/mcp
 ```
