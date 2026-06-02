@@ -416,7 +416,12 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
     logger: {
       level: config.server.logLevel,
       redact: {
-        paths: ["req.headers.cookie", "req.body.password", "req.body.token"],
+        paths: [
+          "req.headers.cookie",
+          "req.body.password",
+          "req.body.confirm",
+          "req.body.token",
+        ],
         censor: "[REDACTED]",
       },
     },
