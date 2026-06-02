@@ -1,212 +1,131 @@
 # Installation Guide
 
-This guide covers deploying MCP Edge Gateway on Unraid, configuring OAuth for
-external exposure, managing backups, and rotating credentials.
-
 ## Prerequisites
 
-- Unraid 6.12 or later with Community Applications and Docker support
-- A Cloudflare account with Tunnel access (for external exposure)
-- The image digest or tag you intend to deploy (see release notes for the
-  validated prerelease digest)
+- Unraid with Docker support (or any Docker host)
+- A Cloudflare account with a tunnel pointed at your host
 
 ---
 
-## Initial Deployment
-
-### 1. Create the config volume
-
-The gateway stores all persistent state under `/config` inside the container.
-Map this to a directory on your array or cache drive with restrictive
-permissions.
-
-On the Unraid host:
+## 1. Create your config
 
 ```bash
-mkdir -p /mnt/user/appdata/mcp-edge-gateway/config
-chmod 700 /mnt/user/appdata/mcp-edge-gateway/config
+mkdir -p /mnt/user/appdata/mcp-edge-gateway
 ```
 
-### 2. Create gateway.yaml
-
-Copy `gateway.example.yaml` from the repository into your config directory and
-edit it. Set at minimum:
+Copy `gateway.example.yaml` into that directory as `gateway.yaml` and set your
+tunnel hostname and routes:
 
 ```yaml
-security:
-  publicOrigin: https://your-subdomain.example.com # your Cloudflare Tunnel hostname
-  allowedHosts:
-    - your-subdomain.example.com
+server:
+  host: 0.0.0.0
+  port: 8788
 
 oauth:
   enabled: true
   issuer: https://your-subdomain.example.com
+
+security:
+  publicOrigin: https://your-subdomain.example.com
+  allowedHosts:
+    - your-subdomain.example.com
+  requireAuth: true
+
+admin:
+  enabled: true
+  host: 0.0.0.0
+  port: 8789
 
 routes:
   - path: /unraid
     upstream: http://unraid-agent.local:8043
 ```
 
-Remove both `insecureAllowHttpPublicOrigin: true` and
-`insecureAllowUnauthenticatedMcp: true` before external exposure. Both flags
-must be absent or `false` in production.
+## 2. Start the container
 
-### 3. Start the container
-
-Create a `.env` file with host paths (see `README.md` for the full example),
-then pull and start:
+Create `.env`:
 
 ```bash
-docker compose up -d
+printf 'GATEWAY_CONFIG_DIR=/mnt/user/appdata/mcp-edge-gateway\nGATEWAY_STATE_DIR=/mnt/user/appdata/mcp-edge-gateway/state\nGATEWAY_ADMIN_BIND_ADDRESS=192.168.1.x\n' > .env
 ```
 
-Or via Unraid's template system: map host path
-`/mnt/user/appdata/mcp-edge-gateway` to container path `/config`, and
-`/mnt/user/appdata/mcp-edge-gateway/state` to `/config/state`.
-
-The public listener binds on port **8788**. The admin listener (when enabled)
-binds on port **8789** and must never be forwarded through Cloudflare Tunnel.
-
-> **Docker requirement:** Set `admin.host: 0.0.0.0` in `gateway.yaml` when
-> running in Docker. Docker's port forwarding connects to the container via its
-> bridge IP, not via the container's loopback (`127.0.0.1`). A service bound
-> only to `127.0.0.1` inside the container is unreachable via published ports.
-> Restrict access instead via `GATEWAY_ADMIN_BIND_ADDRESS` on the host side.
-
-### 4. First-run bootstrap
-
-If `admin.enabled: true` in your config, a one-time bootstrap credential is
-printed to container logs on first start:
-
-```
-BOOTSTRAP CREDENTIAL: <base64url string>
-```
-
-Visit `http://your-lan-ip:8789/admin/setup`, enter the credential, and set
-an administration password (minimum 12 characters). The credential is consumed
-immediately and cannot be reused.
-
-### 5. Set the OAuth resource-owner password
-
-Log in to the admin UI at `http://your-lan-ip:8789/admin/login`, navigate to
-**OAuth User**, and set a separate password for OAuth logins. This password is
-distinct from the administration password and is used only when a client
-performs the OAuth authorization code flow.
-
-### 6. Enable OAuth and verify
-
-Set `oauth.enabled: true` and `security.requireAuth: true` in `gateway.yaml`,
-then restart the container. Verify:
+Replace `192.168.1.x` with your Unraid host's LAN IP, then start:
 
 ```bash
-# Protected-resource metadata (should include authorization_servers)
-curl https://your-subdomain.example.com/.well-known/oauth-protected-resource/unraid/mcp
+docker compose -f docker-compose.yml -f docker-compose.admin.yml up -d
+```
 
-# Authorization-server metadata
-curl https://your-subdomain.example.com/.well-known/oauth-authorization-server
+## 3. Set up the admin account
 
-# Unauthenticated MCP request must return 401 with WWW-Authenticate
-curl -i https://your-subdomain.example.com/unraid/mcp
+Check the container logs for the one-time bootstrap credential:
+
+```bash
+docker logs mcp-edge-gateway | grep BOOTSTRAP
+```
+
+Visit `http://your-lan-ip:8789/admin/setup`, enter the credential, and set an
+admin password (12+ characters).
+
+## 4. Set the OAuth password
+
+Log in at `http://your-lan-ip:8789/admin/login`, go to **OAuth User**, and set
+a password. This is what you'll enter when Claude.ai asks you to log in.
+
+## 5. Connect Claude.ai or Claude Code
+
+In Claude.ai, add a new MCP connector with your tunnel URL:
+
+```
+https://your-subdomain.example.com/unraid/mcp
+```
+
+Claude.ai will redirect you through OAuth login. Use the password you set in
+step 4.
+
+For Claude Code:
+
+```bash
+claude mcp add --transport http https://your-subdomain.example.com/unraid/mcp
 ```
 
 ---
 
-## Cloudflare Tunnel Setup
+## Cloudflare Tunnel
 
-Cloudflare Tunnel forwards HTTPS traffic to the container's public port 8788.
-The administration port 8789 must **never** be routed through the tunnel.
+Point the tunnel public hostname at `http://localhost:8788` (or
+`http://unraid-ip:8788`). Don't route port 8789 through the tunnel.
 
-1. In the Cloudflare Zero Trust dashboard, create a tunnel and point the
-   public hostname to `http://localhost:8788` (or `http://unraid-ip:8788`
-   if the tunnel runs on a different host).
-2. Set `security.trustedProxies: ["100.64.0.0/10"]` in `gateway.yaml` so the
-   gateway trusts the Cloudflare WARP IP range for `X-Forwarded-For`.
-3. Add your Cloudflare Tunnel hostname to `security.allowedHosts`.
-4. Disable caching for `/mcp`, `/sse`, `/messages`, and `/oauth` paths in your
-   Cloudflare Cache Rules.
+Disable caching for `/mcp`, `/sse`, `/messages`, and `/oauth` paths in
+Cloudflare Cache Rules.
 
-> **AI Crawl Control / Bot Fight Mode:** Cloudflare's **Security → Settings →
-> AI Crawl Control** feature can block Anthropic's MCP broker — Claude.ai
-> connects through Anthropic's servers, not directly from your browser. If
-> "Block AI training bots" is set to "Block on all pages", the OAuth flow will
-> complete successfully but the subsequent authenticated MCP request will be
-> silently dropped, leaving Claude.ai showing "Authorization failed". Change
-> the setting to **Allow** for the tunnel hostname, or add an exception for
-> Anthropic's IP ranges. The same issue can occur with Bot Fight Mode if
-> Anthropic's servers are classified as bots.
+> **AI Crawl Control:** If you have "Block AI training bots" enabled in
+> Cloudflare Security settings, Claude.ai will fail to connect after OAuth —
+> Anthropic's MCP broker is classified as a bot. Set it to **Allow**.
 
 ---
 
-## Backup and Restore
+## Backup
 
-### What to back up
-
-Everything under `/config`:
-
-- `gateway.yaml` — gateway configuration
-- `gateway.yaml.bak.*` — timestamped configuration backups
-- `state/gateway.db` — SQLite database (tokens, sessions, OAuth clients)
-
-### Backup procedure
-
-```bash
-# Quiesce writes by pausing the container (optional; SQLite WAL handles concurrent access)
-docker pause mcp-edge-gateway
-
-# Archive the config directory
-tar -czf gateway-backup-$(date +%Y%m%d%H%M%S).tar.gz \
-  /mnt/user/appdata/mcp-edge-gateway/config
-
-docker unpause mcp-edge-gateway
-```
-
-Store the archive offline or in a location not accessible from the Unraid host.
-Treat backups as sensitive: they contain the hashed admin password, hashed
-OAuth user password, and active token hashes.
-
-### Restore procedure
-
-1. Stop the container.
-2. Replace `/mnt/user/appdata/mcp-edge-gateway/config` with the archive
-   contents.
-3. Verify file permissions: `chmod 700 config/ && chmod 600 config/gateway.yaml
-config/state/gateway.db`.
-4. Start the container.
-5. Revoke any tokens issued after the restore point (see below) — they are
-   present in the live database but not in the restored backup.
+Back up `/mnt/user/appdata/mcp-edge-gateway` — it contains your config and the
+SQLite database with tokens and credentials. Treat it as sensitive.
 
 ---
 
-## Credential Rotation
+## Troubleshooting
 
-### Administration password
+**Gateway exits immediately:** Check `gateway.yaml` — route paths must be base
+paths like `/unraid`, not `/unraid/mcp`.
 
-Log in to the admin UI, navigate to **Dashboard**, and use the password change
-form. The session is rotated on save. All other active sessions are invalidated
-immediately.
+**Claude.ai shows "Authorization failed" after login:** Check Cloudflare AI
+Crawl Control (see above).
 
-### OAuth resource-owner password
+**Can't reach admin UI:** Make sure `admin.host: 0.0.0.0` is set and
+`GATEWAY_ADMIN_BIND_ADDRESS` is your host's LAN IP, not `127.0.0.1`.
 
-Navigate to **OAuth User** in the admin UI and set a new password. Existing
-issued access tokens remain valid until expiry. To invalidate them immediately,
-revoke them from the **Tokens** page.
-
-### Bearer tokens
-
-Navigate to **Tokens** in the admin UI. Revoke individual tokens or issue new
-ones with updated scope or expiry. Tokens are shown in plaintext only at
-issuance and cannot be recovered afterward.
-
-### Bootstrap credential
-
-The bootstrap credential is a one-time secret consumed during initial setup. It
-cannot be regenerated without resetting the admin account. To re-trigger
-bootstrap, delete the `admin_credentials` row in `state/gateway.db`:
+**Need to reset the admin password:** Delete the credentials row and restart:
 
 ```bash
-sqlite3 /mnt/user/appdata/mcp-edge-gateway/config/state/gateway.db \
+sqlite3 /mnt/user/appdata/mcp-edge-gateway/state/gateway.db \
   "DELETE FROM admin_credentials;"
+docker restart mcp-edge-gateway
 ```
-
-Then restart the container. The next start prints a new bootstrap credential.
-
