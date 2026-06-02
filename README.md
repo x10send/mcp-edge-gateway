@@ -147,15 +147,15 @@ two paths and two ports from the table in the installation guide, drop a
 Version tags publish container images to GitHub Container Registry:
 
 ```bash
-git tag v0.2.4
-git push origin v0.2.4
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 The release workflow publishes:
 
 ```text
-ghcr.io/x10send/mcp-edge-gateway:0.2.4
-ghcr.io/x10send/mcp-edge-gateway:0.2
+ghcr.io/x10send/mcp-edge-gateway:0.3.0
+ghcr.io/x10send/mcp-edge-gateway:0.3
 ghcr.io/x10send/mcp-edge-gateway:0
 ghcr.io/x10send/mcp-edge-gateway:latest
 ```
