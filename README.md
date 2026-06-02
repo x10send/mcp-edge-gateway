@@ -1,8 +1,9 @@
 # MCP Edge Gateway
 
-A small Dockerized Fastify gateway for routing MCP streamable HTTP traffic to
-local MCP servers. It is intended to run on Unraid and sit behind a Cloudflare
-Tunnel.
+A Dockerized Fastify gateway that routes MCP streamable HTTP traffic from the
+internet to local MCP servers. Designed to run on Unraid (or any Docker host)
+behind a Cloudflare Tunnel, with an embedded OAuth 2.1 authorization server so
+Claude.ai, Claude Code, and ChatGPT can authenticate securely.
 
 Each configured backend exposes three endpoints automatically:
 
@@ -15,31 +16,21 @@ POST/DELETE     /unraid/messages -> http://unraid-agent.local:8043/messages
 ## Features
 
 - Path-prefix routing: one `routes[]` entry registers `/mcp`, `/sse`, and `/messages` endpoints for a backend
+- Embedded OAuth 2.1 authorization server (PKCE S256, refresh rotation, dynamic client registration)
+- Compatible with Claude.ai, Claude Code, and ChatGPT MCP connectors
 - Streaming relay for MCP SSE responses; rewrites `endpoint` event URLs for the legacy HTTP+SSE transport
 - Preservation of end-to-end headers, including `Mcp-Session-Id`
-- Configurable case-insensitive glob allowlist and denylist
+- Configurable case-insensitive glob allowlist and denylist per route
 - Default denial of tool names containing `shell`, `exec`, `write`, `delete`,
   `restart`, `stop`, `start`, `reboot`, `shutdown`, `update`, or `install`
 - JSON `tools/list` filtering and server-side blocking of denied `tools/call`
+- Per-tool OAuth scope enforcement
+- LAN-only admin UI for configuration, token management, and audit log
 - Health endpoint at `/health`
 
-The current `main` branch includes an embedded OAuth authorization server for
-Phase 4 development and testing. External exposure remains blocked until Phase
-5 protocol integration, deployment validation, and release review are complete.
-
-> **Security warning:** `v0.1.0` is a LAN-only development baseline. Do not
-> expose MCP routes through Cloudflare Tunnel until the OAuth and security
-> phases in [`ProjectSpec.md`](./ProjectSpec.md) are complete.
-
-The gateway includes ChatGPT-compatible OAuth and an optional configuration web
-page on a separate LAN-only administration listener. The administration
-listener must not be forwarded through Cloudflare Tunnel. See
-[`ProjectSpec.md`](./ProjectSpec.md) for the planned security boundaries.
-OAuth tokens and passwords are stored separately from `gateway.yaml`; public
-examples never include deployment credentials.
-Admin session cookies are secure by default. Put the LAN-only admin listener
-behind HTTPS, or explicitly enable `admin.insecureAllowHttpCookies` only for an
-isolated direct-HTTP LAN setup.
+OAuth tokens and passwords are stored in SQLite, separately from `gateway.yaml`.
+Admin session cookies are `Secure` and `HttpOnly` by default. The admin listener
+must not be forwarded through Cloudflare Tunnel.
 
 ## Configuration
 
@@ -126,8 +117,7 @@ Run tests with the enforced coverage report directly:
 npm run test:coverage
 ```
 
-See [`ProjectSpec.md`](./ProjectSpec.md) for the architecture and roadmap, and
-[`CONTRIBUTING.md`](./CONTRIBUTING.md) for testing and public-repository rules.
+See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for testing and public-repository rules.
 
 Check the gateway:
 
@@ -233,16 +223,8 @@ gh attestation verify \
 
 Release images include an SBOM and GitHub build-provenance attestation.
 
-The checked-in CodeQL workflow is manual while the repository remains private.
-Enable its push, pull-request, and scheduled triggers when the repository is
-public or GitHub Advanced Security is available.
-
-Required branch-protection checks are also pending the public transition or a
-GitHub plan that supports protection rules for private repositories.
-
 ## Cloudflare Tunnel
 
-The following is a future deployment step. Do not enable it for `v0.1.0`.
 Complete [`docs/SECURE_DEPLOYMENT_CHECKLIST.md`](./docs/SECURE_DEPLOYMENT_CHECKLIST.md)
 before external exposure.
 
@@ -263,6 +245,14 @@ curl https://mcp.example.com/unraid/mcp
 
 Cloudflare should pass MCP request and response headers through unchanged. Do
 not configure caching for MCP routes.
+
+> **Cloudflare AI Crawl Control:** If you use Cloudflare's **Security →
+> Settings → AI Crawl Control** feature with "Block AI training bots" set to
+> "Block on all pages", Anthropic's MCP broker will be blocked and Claude.ai
+> will fail to connect after completing OAuth. Change the setting to **Allow**
+> for MCP routes, or disable it entirely for the tunnel hostname. The same
+> applies to Cloudflare Bot Fight Mode if it classifies Anthropic's servers as
+> bots.
 
 ## Add Another Backend
 

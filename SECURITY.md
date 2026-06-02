@@ -11,7 +11,6 @@ version, reproduction steps, impact, and any proposed mitigation.
 This gateway can reach private MCP backends. Before exposing it to untrusted
 clients:
 
-- Do not expose the `v0.1.0` development baseline externally.
 - Complete [`docs/SECURE_DEPLOYMENT_CHECKLIST.md`](./docs/SECURE_DEPLOYMENT_CHECKLIST.md).
 - Add and validate OAuth authentication.
 - Keep backend addresses, tunnel details, tokens, and credentials out of git.

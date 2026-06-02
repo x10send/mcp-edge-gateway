@@ -116,9 +116,9 @@ The admin app runs as a completely separate Fastify instance on `admin.host:admi
 
 **Admin config settings (in `gateway.yaml`):** `admin.port` (must differ from 8788), `admin.host` (default 127.0.0.1), `admin.insecureAllowHttpCookies` (default false; LAN-only direct HTTP override), `admin.sessionTtlSeconds` (default 28800), `admin.maxLoginAttemptsPerHour` (default 10), `admin.loginLockoutSeconds` (default 900). Admin config changes require a gateway restart to take effect.
 
-## OAuth Resource Server (Phase 3)
+## OAuth Resource Server
 
-Phase 3 adds RFC 6750 Bearer token enforcement and RFC 9728 protected resource metadata.
+RFC 6750 Bearer token enforcement and RFC 9728 protected resource metadata.
 
 **Discovery:** `GET /.well-known/oauth-protected-resource` (root) and `GET /.well-known/oauth-protected-resource/<prefix>/mcp` (path-specific) return the resource metadata document. These endpoints are unauthenticated.
 
@@ -126,13 +126,9 @@ Phase 3 adds RFC 6750 Bearer token enforcement and RFC 9728 protected resource m
 
 **Token issuance:** Admin UI at `/admin/tokens`. Tokens are 32-byte random base64url strings; only the SHA-256 hash is stored. Plaintext is shown once. Tokens carry optional description, scope, route audience, and expiry.
 
-## OAuth Authorization Server (Phase 4)
+## OAuth Authorization Server
 
 When `oauth.enabled: true`, the public listener exposes authorization-server
 metadata plus `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`, and
 `/oauth/register`. OAuth login uses a separate resource-owner password managed
 at `/admin/oauth-user`; do not reuse the LAN administration password.
-
-## Current Status
-
-Phases 0–5 are complete. Phase 5 added: full ChatGPT-compatible OAuth flow tests (`test/chatgpt-oauth-flow.test.ts`), protocol-level OAuth regression tests, installation guide (`docs/INSTALLATION.md`), incident-response runbook (`docs/INCIDENT_RESPONSE.md`), release notes with residual risks (`docs/RELEASE_NOTES.md`), and prerelease-safe Docker release CI (skips `latest` tag for prerelease semver). See `docs/SECURE_DEPLOYMENT_CHECKLIST.md` for the full exposure-readiness checklist.

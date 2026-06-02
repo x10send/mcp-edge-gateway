@@ -125,6 +125,16 @@ The administration port 8789 must **never** be routed through the tunnel.
 4. Disable caching for `/mcp`, `/sse`, `/messages`, and `/oauth` paths in your
    Cloudflare Cache Rules.
 
+> **AI Crawl Control / Bot Fight Mode:** Cloudflare's **Security → Settings →
+> AI Crawl Control** feature can block Anthropic's MCP broker — Claude.ai
+> connects through Anthropic's servers, not directly from your browser. If
+> "Block AI training bots" is set to "Block on all pages", the OAuth flow will
+> complete successfully but the subsequent authenticated MCP request will be
+> silently dropped, leaving Claude.ai showing "Authorization failed". Change
+> the setting to **Allow** for the tunnel hostname, or add an exception for
+> Anthropic's IP ranges. The same issue can occur with Bot Fight Mode if
+> Anthropic's servers are classified as bots.
+
 ---
 
 ## Backup and Restore
