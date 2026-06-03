@@ -111,13 +111,8 @@ export function registerOAuthAuthorizationServer(
     setTransactionCookie(reply, oauth, tx.plaintext);
     return reply.type("text/html").send(
       oauthPage(
-        "OAuth Login",
-        `<h2>Sign in to authorize ${escapeHtml(validated.client.client_name)}</h2>
-        <form method="POST" action="/oauth/authorize/login">
-          <input type="hidden" name="_csrf" value="${escapeHtml(tx.csrfToken)}">
-          <label>Password<br><input type="password" name="password" required autocomplete="current-password"></label><br><br>
-          <button type="submit">Continue</button>
-        </form>`,
+        "Sign in",
+        loginPageHtml(validated.client.client_name, tx.csrfToken),
       ),
     );
   });
@@ -130,12 +125,19 @@ export function registerOAuthAuthorizationServer(
     if (!validCsrf(tx, body._csrf)) {
       return oauthError(reply, 403, "access_denied", "Invalid CSRF token");
     }
+    const clientName =
+      getClient(db, tx.clientId)?.client_name ?? tx.clientId;
+    const rerender = (code: number, error: string) =>
+      reply
+        .code(code)
+        .type("text/html")
+        .send(oauthPage("Sign in", loginPageHtml(clientName, tx.csrfToken, error)));
     if (oauthLoginRateLimited(db, oauth, request.ip)) {
-      return oauthError(reply, 429, "slow_down", "Login rate limit exceeded");
+      return rerender(429, "Too many login attempts. Please try again later.");
     }
     if (!(await verifyOAuthUserPassword(db, body.password ?? ""))) {
       recordOAuthLoginAttempt(db, request.ip, false);
-      return oauthError(reply, 401, "access_denied", "Invalid credentials");
+      return rerender(401, "Incorrect password.");
     }
     recordOAuthLoginAttempt(db, request.ip, true);
     db.prepare(
@@ -143,15 +145,8 @@ export function registerOAuthAuthorizationServer(
     ).run(tx.tokenHash);
     return reply.type("text/html").send(
       oauthPage(
-        "OAuth Consent",
-        `<h2>Approve access</h2>
-        <p>Resource: <code>${escapeHtml(tx.resource)}</code></p>
-        <p>Scopes: <code>${escapeHtml(tx.scope || "(none)")}</code></p>
-        <form method="POST" action="/oauth/authorize/consent">
-          <input type="hidden" name="_csrf" value="${escapeHtml(tx.csrfToken)}">
-          <button type="submit" name="decision" value="approve">Approve</button>
-          <button type="submit" name="decision" value="deny">Deny</button>
-        </form>`,
+        "Allow access?",
+        consentPageHtml(clientName, tx.resource, tx.scope, tx.csrfToken),
       ),
     );
   });
@@ -234,6 +229,14 @@ export async function setOAuthUserPassword(
   ).run(passwordHash);
 }
 
+// Cached dummy hash so verifyOAuthUserPassword always runs argon2 regardless
+// of whether credentials exist, preventing timing-based enumeration.
+let _oauthDummyHash: string | undefined;
+async function getOauthDummyHash(): Promise<string> {
+  _oauthDummyHash ??= await argon2Hash("", ARGON2_OPTIONS);
+  return _oauthDummyHash;
+}
+
 export async function verifyOAuthUserPassword(
   db: DatabaseSync,
   password: string,
@@ -241,7 +244,11 @@ export async function verifyOAuthUserPassword(
   const row = db
     .prepare("SELECT password_hash FROM oauth_user_credentials WHERE id = 1")
     .get() as { password_hash: string } | undefined;
-  return row ? argon2Verify(row.password_hash, password) : false;
+  if (row) {
+    return argon2Verify(row.password_hash, password);
+  }
+  await argon2Verify(await getOauthDummyHash(), password).catch(() => {});
+  return false;
 }
 
 function metadata(oauth: OAuthConfig) {
@@ -1007,8 +1014,134 @@ function escapeHtml(value: string): string {
   });
 }
 
+const OAUTH_CSS = `
+*,*::before,*::after{box-sizing:border-box}
+:root{
+  --bg:#f8fafc;--surface:#ffffff;--surface-2:#f1f5f9;
+  --border:#e2e8f0;--border-2:#cbd5e1;
+  --text:#0f172a;--text-2:#475569;--muted:#64748b;
+  --accent:#2563eb;--accent-h:#1d4ed8;--accent-t:color-mix(in srgb,#2563eb 12%,transparent);
+  --danger:#dc2626;--danger-h:#b91c1c;--danger-t:color-mix(in srgb,#dc2626 12%,transparent);
+  --shadow:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.05);
+  --radius:6px;
+}
+@media(prefers-color-scheme:dark){:root{
+  --bg:#0f172a;--surface:#1e293b;--surface-2:#0f172a;
+  --border:#334155;--border-2:#475569;
+  --text:#f1f5f9;--text-2:#cbd5e1;--muted:#94a3b8;
+  --accent:#3b82f6;--accent-h:#60a5fa;--accent-t:color-mix(in srgb,#3b82f6 15%,transparent);
+  --danger:#ef4444;--danger-h:#f87171;--danger-t:color-mix(in srgb,#ef4444 15%,transparent);
+  --shadow:0 1px 3px rgba(0,0,0,.4),0 1px 2px rgba(0,0,0,.3);
+}}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.5}
+code{font-family:ui-monospace,'Cascadia Code','Fira Code',monospace;font-size:.85em;background:var(--surface-2);padding:.1em .35em;border-radius:3px;word-break:break-all}
+.auth-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:1rem}
+.auth-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:2.5rem;width:100%;max-width:420px;box-shadow:var(--shadow)}
+.auth-logo{font-size:1rem;font-weight:700;color:var(--accent);margin-bottom:.25rem}
+.auth-title{font-size:1.25rem;font-weight:700;margin:0 0 .25rem}
+.auth-subtitle{color:var(--muted);font-size:.875rem;margin-bottom:1.75rem}
+.form-group{margin-bottom:1.25rem}
+.form-label{display:block;font-size:.875rem;font-weight:500;margin-bottom:.375rem}
+.form-input{display:block;width:100%;padding:.5rem .75rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);font-size:.875rem;transition:border-color .15s,outline .15s}
+.form-input:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:var(--accent)}
+.btn{display:inline-flex;align-items:center;justify-content:center;padding:.5rem 1rem;border-radius:var(--radius);font-size:.875rem;font-weight:500;cursor:pointer;border:1px solid transparent;line-height:1.4;transition:background .15s,border-color .15s,color .15s}
+.btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn-primary:hover{background:var(--accent-h);border-color:var(--accent-h)}
+.btn-danger-outline{background:transparent;border-color:var(--danger);color:var(--danger)}
+.btn-danger-outline:hover{background:var(--danger);color:#fff}
+.btn-group{display:flex;gap:.5rem}
+.w-full{width:100%}
+.alert{padding:.75rem 1rem;border-radius:var(--radius);border-left:4px solid;margin-bottom:1.25rem;font-size:.875rem}
+.alert-error{background:var(--danger-t);border-color:var(--danger);color:var(--danger)}
+.info-box{border:1px solid var(--border);border-radius:var(--radius);margin-bottom:1.5rem;overflow:hidden}
+.info-row{padding:.75rem 1rem;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:.2rem}
+.info-row:last-child{border-bottom:none}
+.info-label{font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.info-value{font-size:.875rem;color:var(--text)}
+.scope-badge{display:inline-flex;align-items:center;padding:.15rem .55rem;border-radius:99px;font-size:.75rem;font-weight:600;background:var(--accent-t);color:var(--accent);font-family:ui-monospace,monospace}
+`.trim();
+
 function oauthPage(title: string, body: string): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${escapeHtml(title)}</title></head><body>${body}</body></html>`;
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none';style-src 'unsafe-inline';base-uri 'self';form-action 'self'">
+<title>${escapeHtml(title)} — MCP Gateway</title>
+<style>${OAUTH_CSS}</style>
+</head>
+<body>
+<div class="auth-wrap">
+<div class="auth-card">
+${body}
+</div>
+</div>
+</body>
+</html>`;
+}
+
+function loginPageHtml(
+  clientName: string,
+  csrfToken: string,
+  error?: string,
+): string {
+  const errorHtml = error
+    ? `<div class="alert alert-error">${escapeHtml(error)}</div>`
+    : "";
+  return `<div class="auth-logo">MCP Gateway</div>
+<h2 class="auth-title">Sign in</h2>
+<p class="auth-subtitle"><strong>${escapeHtml(clientName)}</strong> is requesting access to your MCP tools.</p>
+${errorHtml}<form method="POST" action="/oauth/authorize/login">
+  <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
+  <div class="form-group">
+    <label class="form-label" for="pw">Password</label>
+    <input class="form-input" type="password" id="pw" name="password" required autocomplete="current-password" autofocus>
+  </div>
+  <button type="submit" class="btn btn-primary w-full">Continue</button>
+</form>`;
+}
+
+function consentPageHtml(
+  clientName: string,
+  resource: string,
+  scope: string,
+  csrfToken: string,
+): string {
+  const resourcePath = (() => {
+    try {
+      return new URL(resource).pathname;
+    } catch {
+      return resource;
+    }
+  })();
+  const scopes = scope ? scope.split(" ").filter(Boolean) : [];
+  const scopeHtml =
+    scopes.length > 0
+      ? scopes.map((s) => `<span class="scope-badge">${escapeHtml(s)}</span>`).join(" ")
+      : "<span style='color:var(--muted)'>(none)</span>";
+  return `<div class="auth-logo">MCP Gateway</div>
+<h2 class="auth-title">Allow access?</h2>
+<p class="auth-subtitle"><strong>${escapeHtml(clientName)}</strong> is requesting permission to use your MCP tools.</p>
+<div class="info-box">
+  <div class="info-row">
+    <div class="info-label">Application</div>
+    <div class="info-value">${escapeHtml(clientName)}</div>
+  </div>
+  <div class="info-row">
+    <div class="info-label">Resource</div>
+    <div class="info-value"><code>${escapeHtml(resourcePath)}</code></div>
+  </div>
+  <div class="info-row">
+    <div class="info-label">Scopes</div>
+    <div class="info-value">${scopeHtml}</div>
+  </div>
+</div>
+<form method="POST" action="/oauth/authorize/consent">
+  <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
+  <div class="btn-group">
+    <button type="submit" name="decision" value="approve" class="btn btn-primary w-full">Approve</button>
+    <button type="submit" name="decision" value="deny" class="btn btn-danger-outline">Deny</button>
+  </div>
+</form>`;
 }

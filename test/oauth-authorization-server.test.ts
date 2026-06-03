@@ -122,7 +122,7 @@ async function issueCode(ctx: ReturnType<typeof setup>): Promise<string> {
     payload: `_csrf=${encodeURIComponent(csrf)}&password=oauth-user-password`,
   });
   assert.equal(login.statusCode, 200);
-  assert.ok(login.body.includes("Approve access"));
+  assert.ok(login.body.includes("Allow access"));
   const consent = await ctx.app.inject({
     method: "POST",
     url: "/oauth/authorize/consent",
@@ -556,7 +556,7 @@ test("login returns 401 when no OAuth user password has been set", async () => {
       payload: `_csrf=${encodeURIComponent(csrf)}&password=any-password`,
     });
     assert.equal(login.statusCode, 401);
-    assert.equal(login.json().error, "access_denied");
+    assert.ok(login.body.includes("Incorrect password"));
   } finally {
     await ctx.cleanup();
   }

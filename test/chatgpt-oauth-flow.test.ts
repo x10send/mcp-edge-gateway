@@ -243,7 +243,7 @@ test("ChatGPT-compatible OAuth flow: full connection from discovery to authentic
       200,
       "login must succeed and show consent page",
     );
-    assert.ok(login.body.includes("Approve access"), "must show consent form");
+    assert.ok(login.body.includes("Allow access"), "must show consent form");
     const consentCsrf = extractCsrf(login.body);
 
     // Step 7: approve consent

@@ -132,6 +132,14 @@ export function buildApp(config: GatewayConfig, options: BuildAppOptions = {}) {
         ? config.security.trustedProxies
         : false,
   });
+  // Accept any content type for proxy passthrough. Fastify's built-in
+  // application/json parser takes precedence; this catches everything else
+  // (e.g. no Content-Type, text/plain variants, multipart) so MCP clients
+  // that don't send a recognised type don't get a 415 before they reach auth.
+  app.addContentTypeParser("*", { parseAs: "buffer" }, (_req, body, done) => {
+    done(null, body);
+  });
+
   if (config.oauth.enabled) {
     void app.register(fastifyCookie);
     void app.register(fastifyFormbody);
@@ -488,6 +496,17 @@ function createProxyHandler(
     }
 
     if (contentType?.toLowerCase().startsWith("text/event-stream")) {
+      // Stateless transport: POST to /mcp returns a bounded SSE response.
+      // Buffer it and apply tool-list filtering the same way JSON responses are.
+      if (!sseEndpointGatewayPath && request.method === "POST") {
+        const responseText = await readBoundedText(
+          upstream.body,
+          config.security.jsonResponseLimitBytes,
+        );
+        reply.removeHeader("content-length");
+        return reply.send(filterSseToolsList(responseText, policy));
+      }
+
       const releaseStream = acquireStream();
       if (!releaseStream) {
         upstream.body.destroy();
@@ -607,6 +626,36 @@ function buildUpstreamUrl(
     target.search = new URL(incomingUrl, "http://gateway.local").search;
   }
   return target;
+}
+
+function filterSseToolsList(text: string, policy: ToolPolicy): string {
+  return text
+    .split(/\n\n/)
+    .map((event) => {
+      if (!event.includes("data:")) return event;
+      const lines = event.split("\n");
+      const dataValues: string[] = [];
+      const nonDataLines: string[] = [];
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          dataValues.push(line.slice(6));
+        } else if (line === "data:") {
+          dataValues.push("");
+        } else {
+          nonDataLines.push(line);
+        }
+      }
+      if (dataValues.length === 0) return event;
+      const rawData = dataValues.join("\n");
+      try {
+        const parsed = JSON.parse(rawData) as unknown;
+        const filtered = JSON.stringify(policy.filterToolsListPayload(parsed));
+        return [...nonDataLines, `data: ${filtered}`].join("\n");
+      } catch {
+        return event;
+      }
+    })
+    .join("\n\n");
 }
 
 function serializeBody(body: unknown): string | Buffer | undefined {

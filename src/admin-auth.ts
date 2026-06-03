@@ -79,6 +79,12 @@ export async function setAdminPassword(
   ).run(passwordHash);
 }
 
+let _adminDummyHash: string | undefined;
+async function getAdminDummyHash(): Promise<string> {
+  _adminDummyHash ??= await argon2Hash("", ARGON2_OPTIONS);
+  return _adminDummyHash;
+}
+
 export async function verifyAdminPassword(
   db: DatabaseSync,
   password: string,
@@ -87,11 +93,11 @@ export async function verifyAdminPassword(
     .prepare("SELECT password_hash FROM admin_credentials WHERE id = 1")
     .get() as { password_hash: string } | undefined;
 
-  if (!row) {
-    return false;
+  if (row) {
+    return argon2Verify(row.password_hash, password);
   }
-
-  return argon2Verify(row.password_hash, password);
+  await argon2Verify(await getAdminDummyHash(), password).catch(() => {});
+  return false;
 }
 
 // ── Rate limiting / lockout ───────────────────────────────────────────────────
