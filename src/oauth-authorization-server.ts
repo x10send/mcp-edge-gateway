@@ -59,7 +59,7 @@ export function registerOAuthAuthorizationServer(
     reply.header("Referrer-Policy", "no-referrer");
     reply.header(
       "Content-Security-Policy",
-      "default-src 'none'; style-src 'unsafe-inline'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+      "default-src 'none'; style-src 'unsafe-inline'; base-uri 'self'; form-action 'self' https:; frame-ancestors 'none'",
     );
     reply.header("Cache-Control", "no-store");
   });
