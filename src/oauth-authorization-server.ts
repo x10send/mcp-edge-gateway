@@ -109,12 +109,14 @@ export function registerOAuthAuthorizationServer(
     }
     const tx = createAuthorizationTransaction(db, oauth, validated);
     setTransactionCookie(reply, oauth, tx.plaintext);
-    return reply.type("text/html").send(
-      oauthPage(
-        "Sign in",
-        loginPageHtml(validated.client.client_name, tx.csrfToken),
-      ),
-    );
+    return reply
+      .type("text/html")
+      .send(
+        oauthPage(
+          "Sign in",
+          loginPageHtml(validated.client.client_name, tx.csrfToken),
+        ),
+      );
   });
 
   app.post("/oauth/authorize/login", async (request, reply) => {
@@ -125,13 +127,14 @@ export function registerOAuthAuthorizationServer(
     if (!validCsrf(tx, body._csrf)) {
       return oauthError(reply, 403, "access_denied", "Invalid CSRF token");
     }
-    const clientName =
-      getClient(db, tx.clientId)?.client_name ?? tx.clientId;
+    const clientName = getClient(db, tx.clientId)?.client_name ?? tx.clientId;
     const rerender = (code: number, error: string) =>
       reply
         .code(code)
         .type("text/html")
-        .send(oauthPage("Sign in", loginPageHtml(clientName, tx.csrfToken, error)));
+        .send(
+          oauthPage("Sign in", loginPageHtml(clientName, tx.csrfToken, error)),
+        );
     if (oauthLoginRateLimited(db, oauth, request.ip)) {
       return rerender(429, "Too many login attempts. Please try again later.");
     }
@@ -143,12 +146,14 @@ export function registerOAuthAuthorizationServer(
     db.prepare(
       "UPDATE oauth_authorization_transactions SET authenticated = 1 WHERE token_hash = ?",
     ).run(tx.tokenHash);
-    return reply.type("text/html").send(
-      oauthPage(
-        "Allow access?",
-        consentPageHtml(clientName, tx.resource, tx.scope, tx.csrfToken),
-      ),
-    );
+    return reply
+      .type("text/html")
+      .send(
+        oauthPage(
+          "Allow access?",
+          consentPageHtml(clientName, tx.resource, tx.scope, tx.csrfToken),
+        ),
+      );
   });
 
   app.post("/oauth/authorize/consent", async (request, reply) => {
@@ -1118,7 +1123,9 @@ function consentPageHtml(
   const scopes = scope ? scope.split(" ").filter(Boolean) : [];
   const scopeHtml =
     scopes.length > 0
-      ? scopes.map((s) => `<span class="scope-badge">${escapeHtml(s)}</span>`).join(" ")
+      ? scopes
+          .map((s) => `<span class="scope-badge">${escapeHtml(s)}</span>`)
+          .join(" ")
       : "<span style='color:var(--muted)'>(none)</span>";
   return `<div class="auth-logo">MCP Gateway</div>
 <h2 class="auth-title">Allow access?</h2>
