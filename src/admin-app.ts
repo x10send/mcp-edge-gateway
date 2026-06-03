@@ -37,7 +37,7 @@ import fastifyCookie from "@fastify/cookie";
 import fastifyFormbody from "@fastify/formbody";
 import type { DatabaseSync } from "node:sqlite";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
-import type { GatewayConfig } from "./config.js";
+import type { GatewayConfig, UpstreamAuthConfig } from "./config.js";
 import { loadConfig } from "./config.js";
 import { writeConfigAtomic } from "./config-writer.js";
 import { discoverTools } from "./upstream-mcp-client.js";
@@ -1697,7 +1697,17 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
     options.onConfigSaved?.();
 
     const upstreamDispatcher = createUpstreamDispatcher(config.security);
-    const discovery = await discoverTools(upstream, upstreamDispatcher);
+    const newRouteAuth: UpstreamAuthConfig | undefined =
+      authType === "bearer" && authEnv
+        ? { type: "bearer", tokenEnv: authEnv }
+        : authType === "header" && authEnv && authHeader
+          ? { type: "header", secretEnv: authEnv, headerName: authHeader }
+          : undefined;
+    const discovery = await discoverTools(
+      upstream,
+      upstreamDispatcher,
+      newRouteAuth,
+    );
     await upstreamDispatcher.close();
 
     if (discovery.tools.length > 0) {
@@ -1993,7 +2003,11 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
     }
 
     const upstreamDispatcher = createUpstreamDispatcher(config.security);
-    const result = await discoverTools(route.upstream, upstreamDispatcher);
+    const result = await discoverTools(
+      route.upstream,
+      upstreamDispatcher,
+      route.upstreamAuth,
+    );
     await upstreamDispatcher.close();
 
     if (result.tools.length > 0) {

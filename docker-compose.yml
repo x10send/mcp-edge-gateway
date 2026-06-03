@@ -4,14 +4,13 @@ services:
     build: .
     container_name: mcp-edge-gateway
     restart: unless-stopped
+    network_mode: host
     init: true
     read_only: true
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    ports:
-      - "8788:8788"
     tmpfs:
       - /tmp:size=16m,mode=1777
     volumes:

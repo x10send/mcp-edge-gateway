@@ -10,6 +10,7 @@ import {
   type Dispatcher,
 } from "undici";
 import type { GatewayConfig, UpstreamAuthConfig } from "./config.js";
+import { resolveUpstreamAuthHeader } from "./config.js";
 import { hasScope, lookupToken } from "./oauth-token-store.js";
 import {
   registerOAuthAuthorizationServer,
@@ -439,7 +440,10 @@ function createProxyHandler(
 
     const upstreamHeaders = copyRequestHeaders(request.headers);
     if (upstreamAuthConfig) {
-      const authHeader = buildUpstreamAuthHeader(upstreamAuthConfig, env ?? {});
+      const authHeader = resolveUpstreamAuthHeader(
+        upstreamAuthConfig,
+        env ?? {},
+      );
       if (!authHeader) {
         return reply.code(502).send({
           error: "Upstream authentication is misconfigured",
@@ -759,22 +763,6 @@ function isAllowedHost(
       allowedHost.replace(/^\[|\]$/g, "").toLowerCase() ===
       hostname.toLowerCase(),
   );
-}
-
-function buildUpstreamAuthHeader(
-  auth: UpstreamAuthConfig,
-  env: NodeJS.ProcessEnv,
-): { name: string; value: string } | undefined {
-  if (auth.type === "bearer") {
-    const value = auth.tokenEnv ? (env[auth.tokenEnv] ?? "") : "";
-    return value
-      ? { name: "authorization", value: `Bearer ${value}` }
-      : undefined;
-  }
-  // type === "header"
-  const value = auth.secretEnv ? (env[auth.secretEnv] ?? "") : "";
-  const name = (auth.headerName ?? "").toLowerCase();
-  return value && name ? { name, value } : undefined;
 }
 
 function hasBearerToken(

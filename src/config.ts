@@ -20,6 +20,21 @@ export interface UpstreamAuthConfig {
   secretEnv?: string; // env var holding the header value (type=header)
 }
 
+export function resolveUpstreamAuthHeader(
+  auth: UpstreamAuthConfig,
+  env: NodeJS.ProcessEnv,
+): { name: string; value: string } | undefined {
+  if (auth.type === "bearer") {
+    const value = auth.tokenEnv ? (env[auth.tokenEnv] ?? "") : "";
+    return value
+      ? { name: "authorization", value: `Bearer ${value}` }
+      : undefined;
+  }
+  const value = auth.secretEnv ? (env[auth.secretEnv] ?? "") : "";
+  const name = (auth.headerName ?? "").toLowerCase();
+  return value && name ? { name, value } : undefined;
+}
+
 export interface RouteConfig {
   path: string;
   upstream: string;

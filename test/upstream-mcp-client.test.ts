@@ -10,9 +10,18 @@ import { discoverTools } from "../src/upstream-mcp-client.js";
 function makeToolsServer(
   tools: Array<{ name: string; description?: string }>,
   responseFormat: "json" | "sse" = "sse",
+  requiredAuthHeader?: { name: string; value: string },
 ): Promise<{ url: string; close: () => void }> {
   return new Promise((resolve) => {
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      if (requiredAuthHeader) {
+        const actual = req.headers[requiredAuthHeader.name.toLowerCase()];
+        if (actual !== requiredAuthHeader.value) {
+          res.writeHead(401, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Unauthorized" }));
+          return;
+        }
+      }
       if (req.method === "DELETE") {
         res.writeHead(200);
         res.end();
@@ -117,4 +126,45 @@ test("discoverTools returns error and empty tools when upstream is unreachable",
 
   assert.ok(result.error);
   assert.deepEqual(result.tools, []);
+});
+
+test("discoverTools sends bearer token when upstreamAuth is configured", async () => {
+  const tools = [{ name: "ha_tool", description: "A HA tool" }];
+  const { url, close } = await makeToolsServer(tools, "json", {
+    name: "authorization",
+    value: "Bearer test-secret-token",
+  });
+
+  process.env.HA_TEST_TOKEN = "test-secret-token";
+  let result: Awaited<ReturnType<typeof discoverTools>>;
+  try {
+    result = await discoverTools(url, undefined, {
+      type: "bearer",
+      tokenEnv: "HA_TEST_TOKEN",
+    });
+  } finally {
+    delete process.env.HA_TEST_TOKEN;
+  }
+  close();
+
+  assert.equal(result.error, undefined);
+  assert.deepEqual(result.tools, [
+    { name: "ha_tool", description: "A HA tool" },
+  ]);
+});
+
+test("discoverTools returns empty tools when bearer token is missing", async () => {
+  const tools = [{ name: "ha_tool" }];
+  const { url, close } = await makeToolsServer(tools, "json", {
+    name: "authorization",
+    value: "Bearer correct-token",
+  });
+
+  const result = await discoverTools(url, undefined, {
+    type: "bearer",
+    tokenEnv: "HA_MISSING_ENV_VAR",
+  });
+
+  assert.deepEqual(result.tools, []);
+  close();
 });

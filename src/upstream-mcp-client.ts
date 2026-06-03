@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { request } from "undici";
 import type { Dispatcher } from "undici";
+import type { UpstreamAuthConfig } from "./config.js";
+import { resolveUpstreamAuthHeader } from "./config.js";
 
 export interface DiscoveredTool {
   name: string;
@@ -17,9 +19,14 @@ const DISCOVER_TIMEOUT_MS = 10_000;
 export async function discoverTools(
   upstreamBaseUrl: string,
   dispatcher?: Dispatcher,
+  upstreamAuth?: UpstreamAuthConfig,
 ): Promise<DiscoverToolsResult> {
   const mcpUrl = upstreamBaseUrl.replace(/\/$/, "") + "/mcp";
   const requestId = randomBytes(4).readUInt32BE(0);
+  const authHeader = upstreamAuth
+    ? resolveUpstreamAuthHeader(upstreamAuth, process.env)
+    : undefined;
+  const authHeaders = authHeader ? { [authHeader.name]: authHeader.value } : {};
 
   let sessionId: string | undefined;
 
@@ -30,6 +37,7 @@ export async function discoverTools(
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json, text/event-stream",
+        ...authHeaders,
       },
       body: JSON.stringify({
         jsonrpc: "2.0",
@@ -58,6 +66,7 @@ export async function discoverTools(
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json, text/event-stream",
+        ...authHeaders,
         ...(sessionId ? { "Mcp-Session-Id": sessionId } : {}),
       },
       body: JSON.stringify({
@@ -80,7 +89,7 @@ export async function discoverTools(
       try {
         const closeRes = await request(mcpUrl, {
           method: "DELETE",
-          headers: { "Mcp-Session-Id": sessionId },
+          headers: { ...authHeaders, "Mcp-Session-Id": sessionId },
           bodyTimeout: 3_000,
           headersTimeout: 3_000,
           dispatcher,
