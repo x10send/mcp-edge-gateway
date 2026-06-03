@@ -1823,10 +1823,10 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
 
     let toolsContent: string;
     if (cachedTools.length === 0) {
-      toolsContent = `<div class="empty-state">
+      toolsContent = `<div id="tools-table"><div class="empty-state">
         <p>No tools discovered yet.</p>
         <p>Click "Refresh tools" to query the upstream MCP server.</p>
-      </div>`;
+      </div></div>`;
     } else {
       const toolRows = cachedTools
         .map((t) => {
@@ -2082,8 +2082,7 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
     if (!requireCsrf(request, reply, sessionToken)) return;
 
     const theme = getTheme(request);
-    // Send the response first, then exit after a short delay
-    void reply.type("text/html").send(
+    await reply.type("text/html").send(
       htmlAuth(
         "Restarting",
         `<div class="auth-logo">MCP Gateway</div>
@@ -2096,7 +2095,7 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
 <script src="/admin/static/admin.js"></script>`,
       ),
     );
-    setTimeout(() => process.exit(0), 500);
+    setTimeout(() => process.exit(75), 100);
   });
 
   // ── Health ────────────────────────────────────────────────────────────────

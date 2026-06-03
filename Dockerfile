@@ -17,8 +17,10 @@ RUN npm ci --omit=dev \
   && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=build /app/dist ./dist
 
+COPY start.sh ./start.sh
+
 USER node
 
 EXPOSE 8788
 EXPOSE 8789
-CMD ["node", "dist/server.js"]
+CMD ["/bin/sh", "start.sh"]
