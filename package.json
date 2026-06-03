@@ -1,6 +1,6 @@
 {
   "name": "@x10send/mcp-edge-gateway",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "private": true,
   "description": "Route-based MCP edge gateway for local services",
   "type": "module",
