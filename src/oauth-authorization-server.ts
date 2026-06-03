@@ -1026,6 +1026,7 @@ const OAUTH_CSS = `
   --border:#e2e8f0;--border-2:#cbd5e1;
   --text:#0f172a;--text-2:#475569;--muted:#64748b;
   --accent:#2563eb;--accent-h:#1d4ed8;--accent-t:color-mix(in srgb,#2563eb 12%,transparent);
+  --success:#059669;--success-t:color-mix(in srgb,#059669 12%,transparent);
   --danger:#dc2626;--danger-h:#b91c1c;--danger-t:color-mix(in srgb,#dc2626 12%,transparent);
   --shadow:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.05);
   --radius:6px;
@@ -1035,35 +1036,44 @@ const OAUTH_CSS = `
   --border:#334155;--border-2:#475569;
   --text:#f1f5f9;--text-2:#cbd5e1;--muted:#94a3b8;
   --accent:#3b82f6;--accent-h:#60a5fa;--accent-t:color-mix(in srgb,#3b82f6 15%,transparent);
+  --success:#10b981;--success-t:color-mix(in srgb,#10b981 15%,transparent);
   --danger:#ef4444;--danger-h:#f87171;--danger-t:color-mix(in srgb,#ef4444 15%,transparent);
   --shadow:0 1px 3px rgba(0,0,0,.4),0 1px 2px rgba(0,0,0,.3);
 }}
 body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.5}
-code{font-family:ui-monospace,'Cascadia Code','Fira Code',monospace;font-size:.85em;background:var(--surface-2);padding:.1em .35em;border-radius:3px;word-break:break-all}
-.auth-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:1rem}
+code{font-family:ui-monospace,'Cascadia Code','Fira Code',monospace;font-size:.85em;background:var(--surface-2);padding:.1em .35em;border-radius:3px}
+.auth-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg);padding:1rem}
 .auth-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:2.5rem;width:100%;max-width:420px;box-shadow:var(--shadow)}
+.auth-header{text-align:center;margin-bottom:1.75rem}
+.auth-icon{display:inline-flex;align-items:center;justify-content:center;width:52px;height:52px;border-radius:12px;margin-bottom:.75rem}
+.auth-icon.lock{background:var(--accent-t)}
+.auth-icon.shield{background:var(--success-t)}
+.auth-icon svg{width:26px;height:26px;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.auth-icon.lock svg{stroke:var(--accent)}
+.auth-icon.shield svg{stroke:var(--success)}
 .auth-logo{font-size:1rem;font-weight:700;color:var(--accent);margin-bottom:.25rem}
-.auth-title{font-size:1.25rem;font-weight:700;margin:0 0 .25rem}
-.auth-subtitle{color:var(--muted);font-size:.875rem;margin-bottom:1.75rem}
+.auth-title{font-size:1.125rem;font-weight:700;margin:0 0 .25rem}
+.auth-subtitle{color:var(--muted);font-size:.875rem;margin:0}
 .form-group{margin-bottom:1.25rem}
 .form-label{display:block;font-size:.875rem;font-weight:500;margin-bottom:.375rem}
 .form-input{display:block;width:100%;padding:.5rem .75rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);font-size:.875rem;transition:border-color .15s,outline .15s}
 .form-input:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:var(--accent)}
-.btn{display:inline-flex;align-items:center;justify-content:center;padding:.5rem 1rem;border-radius:var(--radius);font-size:.875rem;font-weight:500;cursor:pointer;border:1px solid transparent;line-height:1.4;transition:background .15s,border-color .15s,color .15s}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.375rem;padding:.5rem 1rem;border-radius:var(--radius);font-size:.875rem;font-weight:500;cursor:pointer;border:1px solid transparent;line-height:1.4;transition:background .15s,border-color .15s,color .15s}
 .btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
 .btn-primary:hover{background:var(--accent-h);border-color:var(--accent-h)}
-.btn-danger-outline{background:transparent;border-color:var(--danger);color:var(--danger)}
-.btn-danger-outline:hover{background:var(--danger);color:#fff}
-.btn-group{display:flex;gap:.5rem}
+.btn-ghost{background:none;border:none;color:var(--muted);font-size:.8125rem;padding:.375rem .5rem;cursor:pointer;display:inline-flex}
+.btn-ghost:hover{color:var(--text-2)}
 .w-full{width:100%}
 .alert{padding:.75rem 1rem;border-radius:var(--radius);border-left:4px solid;margin-bottom:1.25rem;font-size:.875rem}
 .alert-error{background:var(--danger-t);border-color:var(--danger);color:var(--danger)}
-.info-box{border:1px solid var(--border);border-radius:var(--radius);margin-bottom:1.5rem;overflow:hidden}
-.info-row{padding:.75rem 1rem;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:.2rem}
+.info-box{border:1px solid var(--border);border-radius:var(--radius);margin-bottom:1.5rem;overflow:hidden;background:var(--surface-2)}
+.info-row{padding:.625rem .875rem;border-bottom:1px solid var(--border);display:flex;align-items:baseline;gap:.875rem}
 .info-row:last-child{border-bottom:none}
-.info-label{font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.info-label{font-size:.6875rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);flex-shrink:0;width:5rem}
 .info-value{font-size:.875rem;color:var(--text)}
-.scope-badge{display:inline-flex;align-items:center;padding:.15rem .55rem;border-radius:99px;font-size:.75rem;font-weight:600;background:var(--accent-t);color:var(--accent);font-family:ui-monospace,monospace}
+.scope-list{display:flex;flex-wrap:wrap;gap:.3rem}
+.scope-badge{display:inline-flex;padding:.2rem .55rem;border-radius:99px;font-size:.75rem;font-weight:600;background:var(--accent-t);color:var(--accent);font-family:ui-monospace,monospace}
+.text-center{text-align:center}
 `.trim();
 
 function oauthPage(title: string, body: string): string {
@@ -1094,16 +1104,21 @@ function loginPageHtml(
   const errorHtml = error
     ? `<div class="alert alert-error">${escapeHtml(error)}</div>`
     : "";
-  return `<div class="auth-logo">MCP Gateway</div>
-<h2 class="auth-title">Sign in</h2>
-<p class="auth-subtitle"><strong>${escapeHtml(clientName)}</strong> is requesting access to your MCP tools.</p>
+  return `<div class="auth-header">
+  <div class="auth-icon lock">
+    <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+  </div>
+  <div class="auth-logo">MCP Gateway</div>
+  <h2 class="auth-title">Sign in to continue</h2>
+  <p class="auth-subtitle"><strong>${escapeHtml(clientName)}</strong> wants access to your MCP tools</p>
+</div>
 ${errorHtml}<form method="POST" action="/oauth/authorize/login">
   <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
   <div class="form-group">
-    <label class="form-label" for="pw">Password</label>
+    <label class="form-label" for="pw">Gateway password</label>
     <input class="form-input" type="password" id="pw" name="password" required autocomplete="current-password" autofocus>
   </div>
-  <button type="submit" class="btn btn-primary w-full">Continue</button>
+  <button type="submit" class="btn btn-primary w-full">Sign in</button>
 </form>`;
 }
 
@@ -1123,16 +1138,19 @@ function consentPageHtml(
   const scopes = scope ? scope.split(" ").filter(Boolean) : [];
   const scopeHtml =
     scopes.length > 0
-      ? scopes
-          .map((s) => `<span class="scope-badge">${escapeHtml(s)}</span>`)
-          .join(" ")
-      : "<span style='color:var(--muted)'>(none)</span>";
-  return `<div class="auth-logo">MCP Gateway</div>
-<h2 class="auth-title">Allow access?</h2>
-<p class="auth-subtitle"><strong>${escapeHtml(clientName)}</strong> is requesting permission to use your MCP tools.</p>
+      ? `<div class="scope-list">${scopes.map((s) => `<span class="scope-badge">${escapeHtml(s)}</span>`).join("")}</div>`
+      : `<span style="color:var(--muted)">(none requested)</span>`;
+  return `<div class="auth-header">
+  <div class="auth-icon shield">
+    <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+  </div>
+  <div class="auth-logo">MCP Gateway</div>
+  <h2 class="auth-title">Allow access?</h2>
+  <p class="auth-subtitle"><strong>${escapeHtml(clientName)}</strong> is requesting the following permissions</p>
+</div>
 <div class="info-box">
   <div class="info-row">
-    <div class="info-label">Application</div>
+    <div class="info-label">App</div>
     <div class="info-value">${escapeHtml(clientName)}</div>
   </div>
   <div class="info-row">
@@ -1146,9 +1164,9 @@ function consentPageHtml(
 </div>
 <form method="POST" action="/oauth/authorize/consent">
   <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
-  <div class="btn-group">
-    <button type="submit" name="decision" value="approve" class="btn btn-primary w-full">Approve</button>
-    <button type="submit" name="decision" value="deny" class="btn btn-danger-outline">Deny</button>
+  <button type="submit" name="decision" value="approve" class="btn btn-primary w-full">Allow access</button>
+  <div class="text-center" style="margin-top:.75rem">
+    <button type="submit" name="decision" value="deny" class="btn btn-ghost">Deny</button>
   </div>
 </form>`;
 }
