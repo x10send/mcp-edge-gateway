@@ -59,7 +59,7 @@ export function registerOAuthAuthorizationServer(
     reply.header("Referrer-Policy", "no-referrer");
     reply.header(
       "Content-Security-Policy",
-      "default-src 'none'; style-src 'unsafe-inline'; base-uri 'self'; form-action 'self' https:; frame-ancestors 'none'",
+      "default-src 'none'; style-src 'unsafe-inline'; base-uri 'self'; frame-ancestors 'none'",
     );
     reply.header("Cache-Control", "no-store");
   });
@@ -1082,7 +1082,7 @@ function oauthPage(title: string, body: string): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none';style-src 'unsafe-inline';base-uri 'self';form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none';style-src 'unsafe-inline';base-uri 'self'">
 <title>${escapeHtml(title)} — MCP Gateway</title>
 <style>${OAUTH_CSS}</style>
 </head>
