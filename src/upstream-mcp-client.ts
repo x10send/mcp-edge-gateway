@@ -54,6 +54,14 @@ export async function discoverTools(
       dispatcher,
     });
 
+    if (initRes.statusCode >= 400) {
+      const body = await initRes.body.text();
+      return {
+        tools: [],
+        error: `initialize: HTTP ${initRes.statusCode} from ${mcpUrl} — ${body.slice(0, 200)}`,
+      };
+    }
+
     sessionId =
       (initRes.headers["mcp-session-id"] as string | undefined) ?? undefined;
 
@@ -83,6 +91,13 @@ export async function discoverTools(
     const contentType =
       (listRes.headers["content-type"] as string | undefined) ?? "";
     const rawBody = await listRes.body.text();
+
+    if (listRes.statusCode >= 400) {
+      return {
+        tools: [],
+        error: `tools/list: HTTP ${listRes.statusCode} from ${mcpUrl} — ${rawBody.slice(0, 200)}`,
+      };
+    }
 
     // Step 3: close the session if we have one
     if (sessionId) {
