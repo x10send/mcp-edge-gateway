@@ -59,7 +59,7 @@ export function registerOAuthAuthorizationServer(
     reply.header("Referrer-Policy", "no-referrer");
     reply.header(
       "Content-Security-Policy",
-      "default-src 'self'; frame-ancestors 'none'",
+      "default-src 'none'; style-src 'unsafe-inline'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
     );
     reply.header("Cache-Control", "no-store");
   });
@@ -1106,7 +1106,7 @@ function loginPageHtml(
     : "";
   return `<div class="auth-header">
   <div class="auth-icon lock">
-    <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+    <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
   </div>
   <div class="auth-logo">MCP Gateway</div>
   <h2 class="auth-title">Sign in to continue</h2>
@@ -1142,7 +1142,7 @@ function consentPageHtml(
       : `<span style="color:var(--muted)">(none requested)</span>`;
   return `<div class="auth-header">
   <div class="auth-icon shield">
-    <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+    <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
   </div>
   <div class="auth-logo">MCP Gateway</div>
   <h2 class="auth-title">Allow access?</h2>
