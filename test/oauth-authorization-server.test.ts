@@ -628,6 +628,94 @@ test("refresh token rejects wrong resource indicator", async () => {
   }
 });
 
+test("login rejects CSRF token with same length but wrong value", async () => {
+  const ctx = setup();
+  try {
+    await setOAuthUserPassword(ctx.db, "oauth-user-password");
+    const authorize = await ctx.app.inject({
+      method: "GET",
+      url: authorizeUrl(),
+    });
+    const cookie = (authorize.headers["set-cookie"] as string).split(";")[0]!;
+    const csrf = hiddenCsrf(authorize.body);
+    const wrongToken =
+      csrf[0] === "A" ? "B" + csrf.slice(1) : "A" + csrf.slice(1);
+    assert.equal(
+      wrongToken.length,
+      csrf.length,
+      "lengths must match for this test",
+    );
+    const login = await ctx.app.inject({
+      method: "POST",
+      url: "/oauth/authorize/login",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      payload: `_csrf=${encodeURIComponent(wrongToken)}&password=oauth-user-password`,
+    });
+    assert.equal(login.statusCode, 403);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("login rejects empty CSRF token", async () => {
+  const ctx = setup();
+  try {
+    await setOAuthUserPassword(ctx.db, "oauth-user-password");
+    const authorize = await ctx.app.inject({
+      method: "GET",
+      url: authorizeUrl(),
+    });
+    const cookie = (authorize.headers["set-cookie"] as string).split(";")[0]!;
+    const login = await ctx.app.inject({
+      method: "POST",
+      url: "/oauth/authorize/login",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      payload: `_csrf=&password=oauth-user-password`,
+    });
+    assert.equal(login.statusCode, 403);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("consent rejects CSRF token with same length but wrong value", async () => {
+  const ctx = setup();
+  try {
+    await setOAuthUserPassword(ctx.db, "oauth-user-password");
+    const authorize = await ctx.app.inject({
+      method: "GET",
+      url: authorizeUrl(),
+    });
+    const cookie = (authorize.headers["set-cookie"] as string).split(";")[0]!;
+    const csrf = hiddenCsrf(authorize.body);
+    // Login successfully
+    const login = await ctx.app.inject({
+      method: "POST",
+      url: "/oauth/authorize/login",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      payload: `_csrf=${encodeURIComponent(csrf)}&password=oauth-user-password`,
+    });
+    assert.equal(login.statusCode, 200);
+    // Consent with same-length wrong CSRF
+    const wrongToken =
+      csrf[0] === "A" ? "B" + csrf.slice(1) : "A" + csrf.slice(1);
+    assert.equal(
+      wrongToken.length,
+      csrf.length,
+      "lengths must match for this test",
+    );
+    const consent = await ctx.app.inject({
+      method: "POST",
+      url: "/oauth/authorize/consent",
+      headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+      payload: `_csrf=${encodeURIComponent(wrongToken)}&decision=approve`,
+    });
+    assert.equal(consent.statusCode, 403);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
 test("removed static clients do not survive an application restart", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mcp-oauth-static-client-"));
   const store = new StateStore(dir);

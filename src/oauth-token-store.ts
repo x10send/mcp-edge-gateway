@@ -63,8 +63,7 @@ export function lookupToken(
          AND (expires_at IS NULL OR expires_at > ?)`,
     )
     .get(sha256Hex(plaintext), now) as
-    | { id: number; scope: string; routes: string }
-    | undefined;
+    { id: number; scope: string; routes: string } | undefined;
 
   if (!row) return undefined;
 

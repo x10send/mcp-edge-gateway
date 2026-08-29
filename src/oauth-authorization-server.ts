@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { lookup } from "node:dns";
 import { isIP } from "node:net";
 import type { DatabaseSync } from "node:sqlite";
@@ -952,7 +952,11 @@ function validCsrf(
   tx: AuthorizationTransaction,
   submitted: string | undefined,
 ): boolean {
-  return submitted !== undefined && submitted === tx.csrfToken;
+  if (!submitted || submitted.length !== tx.csrfToken.length) return false;
+  return timingSafeEqual(
+    Buffer.from(submitted, "utf8"),
+    Buffer.from(tx.csrfToken, "utf8"),
+  );
 }
 
 function appendRedirectParams(

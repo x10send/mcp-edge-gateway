@@ -2,7 +2,11 @@ import { lookup } from "node:dns";
 import type { LookupAddress } from "node:dns";
 import type { LookupFunction } from "node:net";
 import { Agent } from "undici";
-import { isPrivateNetworkAddress, type SecurityConfig } from "./config.js";
+import {
+  isPrivateNetworkAddress,
+  isSpecialUseNetworkAddress,
+  type SecurityConfig,
+} from "./config.js";
 
 export function createUpstreamDispatcher(security: SecurityConfig): Agent {
   return new Agent({
@@ -38,7 +42,10 @@ const privateLookup: LookupFunction = (hostname, _options, callback): void => {
 };
 
 function isPrivateLookupAddress(address: LookupAddress): boolean {
-  return isPrivateNetworkAddress(address.address);
+  return (
+    isPrivateNetworkAddress(address.address) &&
+    !isSpecialUseNetworkAddress(address.address)
+  );
 }
 
 export function selectPrivateLookupAddress(

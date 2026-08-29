@@ -608,6 +608,54 @@ test("POST /admin/config rejects requests with wrong CSRF token", async () => {
   }
 });
 
+test("POST /admin/config rejects CSRF token with same length but wrong value", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie, csrfToken } = await doSetup(ctx);
+    // Construct a same-length wrong token by flipping the first character
+    const wrongToken =
+      csrfToken[0] === "A"
+        ? "B" + csrfToken.slice(1)
+        : "A" + csrfToken.slice(1);
+    assert.equal(
+      wrongToken.length,
+      csrfToken.length,
+      "lengths must match for this test",
+    );
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/config",
+      payload: `_csrf=${encodeURIComponent(wrongToken)}&yaml=${encodeURIComponent(VALID_YAML)}`,
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie,
+      },
+    });
+    assert.equal(res.statusCode, 403);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("POST /admin/config rejects empty CSRF token", async () => {
+  const ctx = setupTest();
+  try {
+    const { cookie } = await doSetup(ctx);
+    const res = await ctx.app.inject({
+      method: "POST",
+      url: "/admin/config",
+      payload: `_csrf=&yaml=${encodeURIComponent(VALID_YAML)}`,
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie,
+      },
+    });
+    assert.equal(res.statusCode, 403);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
 // ── Security: CSRF token not exposed in redirect URLs ────────────────────────
 
 test("POST /admin/login redirect does not expose CSRF token in URL", async () => {

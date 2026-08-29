@@ -288,14 +288,20 @@ function parseRoutes(value: unknown, security: SecurityConfig): RouteConfig[] {
     if (upstreamUrl.hash) {
       throw new Error(`routes[${index}].upstream must not contain a fragment`);
     }
-    if (
-      security.allowPrivateUpstreamsOnly &&
-      isIpAddress(upstreamUrl.hostname) &&
-      !isPrivateNetworkAddress(upstreamUrl.hostname)
-    ) {
-      throw new Error(
-        `routes[${index}].upstream IP address must be on a private network`,
-      );
+    if (isIpAddress(upstreamUrl.hostname)) {
+      if (isSpecialUseNetworkAddress(upstreamUrl.hostname)) {
+        throw new Error(
+          `routes[${index}].upstream must not use a loopback or link-local address`,
+        );
+      }
+      if (
+        security.allowPrivateUpstreamsOnly &&
+        !isPrivateNetworkAddress(upstreamUrl.hostname)
+      ) {
+        throw new Error(
+          `routes[${index}].upstream IP address must be on a private network`,
+        );
+      }
     }
 
     const tools =
@@ -723,6 +729,9 @@ function isIpAddress(hostname: string): boolean {
   return isIP(stripIpv6Brackets(hostname)) !== 0;
 }
 
+// Returns true for RFC-1918 and IPv6 ULA ranges — the only addresses that may
+// serve as upstream MCP backends. Intentionally excludes loopback and link-local;
+// those are blocked separately via isSpecialUseNetworkAddress to avoid SSRF.
 export function isPrivateNetworkAddress(address: string): boolean {
   const normalizedAddress = stripIpv6Brackets(address);
   if (normalizedAddress.includes(":")) {
@@ -742,6 +751,36 @@ export function isPrivateNetworkAddress(address: string): boolean {
     octets[0] === 10 ||
     (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
     (octets[0] === 192 && octets[1] === 168)
+  );
+}
+
+// Returns true for loopback and link-local addresses. These are blocked as
+// upstream targets even when allowPrivateUpstreamsOnly=false to prevent SSRF.
+export function isSpecialUseNetworkAddress(address: string): boolean {
+  // Strip zone ID (e.g. fe80::1%eth0)
+  const normalizedAddress = stripIpv6Brackets(address).split("%")[0]!;
+  if (normalizedAddress.includes(":")) {
+    const normalized = normalizedAddress.toLowerCase();
+    if (normalized === "::1" || normalized.startsWith("fe80:")) return true;
+    // IPv4-mapped IPv6 (::ffff:x.x.x.x) — recurse on the embedded IPv4 part
+    if (normalized.startsWith("::ffff:")) {
+      return isSpecialUseNetworkAddress(normalized.slice(7));
+    }
+    return false;
+  }
+
+  const octets = normalizedAddress.split(".").map(Number);
+  if (
+    octets.length !== 4 ||
+    octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)
+  ) {
+    return false;
+  }
+
+  return (
+    octets[0] === 0 || // 0.0.0.0/8 unspecified — routes to loopback on Linux
+    octets[0] === 127 || // 127.0.0.0/8 loopback
+    (octets[0] === 169 && octets[1] === 254) // 169.254.0.0/16 link-local
   );
 }
 

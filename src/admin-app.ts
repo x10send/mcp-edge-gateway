@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { timingSafeEqual } from "node:crypto";
 
 const APP_VERSION = (
   JSON.parse(
@@ -496,7 +497,15 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
       return false;
     }
     const submitted = (request.body as Record<string, string>)[CSRF_FIELD];
-    if (!submitted || submitted !== session.csrfToken) {
+    const expected = session.csrfToken;
+    const valid =
+      submitted &&
+      submitted.length === expected.length &&
+      timingSafeEqual(
+        Buffer.from(submitted, "utf8"),
+        Buffer.from(expected, "utf8"),
+      );
+    if (!valid) {
       reply.code(403).send(htmlError("Forbidden", "Invalid CSRF token."));
       return false;
     }
