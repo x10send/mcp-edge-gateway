@@ -171,6 +171,19 @@ export const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    name: "006_oauth_token_attempts",
+    sql: `
+      CREATE TABLE oauth_token_attempts (
+        id         INTEGER PRIMARY KEY,
+        ip_address TEXT    NOT NULL,
+        endpoint   TEXT    NOT NULL,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch())
+      );
+      CREATE INDEX oauth_token_attempts_ip_idx
+        ON oauth_token_attempts(ip_address, endpoint, created_at);
+    `,
+  },
 ];
 
 export class StateStore {

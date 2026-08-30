@@ -195,6 +195,10 @@ export function registerOAuthAuthorizationServer(
   });
 
   app.post("/oauth/token", async (request, reply) => {
+    if (tokenRateLimited(db, oauth, request.ip)) {
+      return oauthError(reply, 429, "slow_down", "Token rate limit exceeded");
+    }
+    recordTokenAttempt(db, request.ip, "token");
     const body = stringRecord(request.body);
     if (!body) return oauthError(reply, 400, "invalid_request");
     if (body.grant_type === "authorization_code") {
@@ -213,6 +217,15 @@ export function registerOAuthAuthorizationServer(
   });
 
   app.post("/oauth/revoke", async (request, reply) => {
+    if (revokeRateLimited(db, oauth, request.ip)) {
+      return oauthError(
+        reply,
+        429,
+        "slow_down",
+        "Revocation rate limit exceeded",
+      );
+    }
+    recordTokenAttempt(db, request.ip, "revoke");
     const body = stringRecord(request.body);
     if (!body) return oauthError(reply, 400, "invalid_request");
     if (!body.token) return oauthError(reply, 400, "invalid_request");
@@ -296,6 +309,9 @@ async function validateAuthorizationRequest(
   }
   if (!validScope(query.scope ?? "")) {
     return { error: "Invalid OAuth scope" };
+  }
+  if (query.state !== undefined && !validState(query.state)) {
+    return { error: "Invalid state parameter" };
   }
   if (!resourceRoute(config, query.resource)) {
     return { error: "Invalid resource indicator" };
@@ -841,6 +857,45 @@ function recordOAuthLoginAttempt(
   ).run(ip, succeeded ? 1 : 0);
 }
 
+function tokenRateLimited(
+  db: DatabaseSync,
+  oauth: OAuthConfig,
+  ip: string,
+): boolean {
+  const row = db
+    .prepare(
+      "SELECT count(*) AS n FROM oauth_token_attempts WHERE ip_address = ? AND endpoint = 'token' AND created_at >= ?",
+    )
+    .get(ip, now() - 60) as { n: number };
+  return row.n >= oauth.tokenRateLimitPerMinute;
+}
+
+function revokeRateLimited(
+  db: DatabaseSync,
+  oauth: OAuthConfig,
+  ip: string,
+): boolean {
+  const row = db
+    .prepare(
+      "SELECT count(*) AS n FROM oauth_token_attempts WHERE ip_address = ? AND endpoint = 'revoke' AND created_at >= ?",
+    )
+    .get(ip, now() - 60) as { n: number };
+  return row.n >= oauth.revokeRateLimitPerMinute;
+}
+
+function recordTokenAttempt(
+  db: DatabaseSync,
+  ip: string,
+  endpoint: "token" | "revoke",
+): void {
+  db.prepare("DELETE FROM oauth_token_attempts WHERE created_at < ?").run(
+    now() - 60,
+  );
+  db.prepare(
+    "INSERT INTO oauth_token_attempts (ip_address, endpoint) VALUES (?, ?)",
+  ).run(ip, endpoint);
+}
+
 function inTransaction<T>(db: DatabaseSync, operation: () => T): T {
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -870,6 +925,9 @@ function pruneExpiredOAuthRecords(db: DatabaseSync): void {
   db.prepare(
     "DELETE FROM oauth_registration_attempts WHERE created_at < ?",
   ).run(current - 3_600);
+  db.prepare("DELETE FROM oauth_token_attempts WHERE created_at < ?").run(
+    current - 60,
+  );
 }
 
 function registrationRateLimited(
@@ -991,6 +1049,10 @@ function validScope(scope: string): boolean {
     .split(" ")
     .filter(Boolean)
     .every((value) => /^[\x21\x23-\x5b\x5d-\x7e]+$/.test(value));
+}
+
+function validState(state: string): boolean {
+  return state.length <= 512 && /^[\w\-.~%+/=]*$/.test(state);
 }
 
 function validPkceVerifier(verifier: string): boolean {

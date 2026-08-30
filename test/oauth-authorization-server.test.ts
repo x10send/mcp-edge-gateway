@@ -34,6 +34,8 @@ const config: GatewayConfig = {
     dynamicRegistrationLimitPerHour: 2,
     loginLimitPerHour: 2,
     loginLockoutSeconds: 900,
+    tokenRateLimitPerMinute: 100,
+    revokeRateLimitPerMinute: 100,
     staticClients: [
       {
         clientId: "static-client",
@@ -73,11 +75,19 @@ const config: GatewayConfig = {
   routes: [{ path: "/unraid", upstream: "http://unraid-agent.local:8043" }],
 };
 
-function setup(options: Parameters<typeof buildApp>[1] = {}) {
+function setup(
+  options: Parameters<typeof buildApp>[1] & {
+    overrideConfig?: GatewayConfig;
+  } = {},
+) {
+  const { overrideConfig, ...appOptions } = options;
   const dir = mkdtempSync(join(tmpdir(), "mcp-oauth-server-"));
   const store = new StateStore(dir);
   store.open();
-  const app = buildApp(config, { ...options, db: store.database });
+  const app = buildApp(overrideConfig ?? config, {
+    ...appOptions,
+    db: store.database,
+  });
   return {
     app,
     db: store.database,
@@ -711,6 +721,88 @@ test("consent rejects CSRF token with same length but wrong value", async () => 
       payload: `_csrf=${encodeURIComponent(wrongToken)}&decision=approve`,
     });
     assert.equal(consent.statusCode, 403);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("/oauth/token is rate-limited per IP", async () => {
+  const ctx = setup({
+    overrideConfig: {
+      ...config,
+      oauth: { ...config.oauth, tokenRateLimitPerMinute: 2 },
+    },
+  });
+  try {
+    const tokenRequest = () =>
+      ctx.app.inject({
+        method: "POST",
+        url: "/oauth/token",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        payload: new URLSearchParams({
+          grant_type: "authorization_code",
+          code: "bogus-code",
+          client_id: "static-client",
+          redirect_uri: REDIRECT_URI,
+          resource: RESOURCE,
+          code_verifier: VERIFIER,
+        }).toString(),
+      });
+    assert.equal((await tokenRequest()).statusCode, 400);
+    assert.equal((await tokenRequest()).statusCode, 400);
+    assert.equal((await tokenRequest()).statusCode, 429);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("/oauth/revoke is rate-limited per IP", async () => {
+  const ctx = setup({
+    overrideConfig: {
+      ...config,
+      oauth: { ...config.oauth, revokeRateLimitPerMinute: 2 },
+    },
+  });
+  try {
+    const revokeRequest = () =>
+      ctx.app.inject({
+        method: "POST",
+        url: "/oauth/revoke",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        payload: "token=bogus-token",
+      });
+    assert.equal((await revokeRequest()).statusCode, 200);
+    assert.equal((await revokeRequest()).statusCode, 200);
+    assert.equal((await revokeRequest()).statusCode, 429);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("authorization request rejects state parameter longer than 512 characters", async () => {
+  const ctx = setup();
+  try {
+    const longState = "a".repeat(513);
+    const url = authorizeUrl().replace(
+      "state=client-state",
+      `state=${encodeURIComponent(longState)}`,
+    );
+    const res = await ctx.app.inject({ method: "GET", url });
+    assert.equal(res.statusCode, 400);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("authorization request rejects state parameter with invalid characters", async () => {
+  const ctx = setup();
+  try {
+    const url = authorizeUrl().replace(
+      "state=client-state",
+      `state=${encodeURIComponent("<script>")}`,
+    );
+    const res = await ctx.app.inject({ method: "GET", url });
+    assert.equal(res.statusCode, 400);
   } finally {
     await ctx.cleanup();
   }

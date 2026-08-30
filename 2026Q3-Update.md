@@ -51,11 +51,12 @@ Two CSRF token comparisons use direct string equality (`===`/`!==`) rather than 
 
 **Addresses:** M-1, M-3
 
-- [ ] Add IP-based rate limiting to `POST /oauth/token` (≤20 req/min/IP) reusing the existing DB-backed rate-limiter from `admin-auth.ts`
-- [ ] Add IP-based rate limiting to `POST /oauth/revoke` (≤60 req/min/IP)
-- [ ] Validate `state` parameter in OAuth authorization requests: max 512 chars, URL-safe characters only (`/^[\w\-._~%+/=]*$/`)
-- [ ] Add tests for rate limiting and state validation
-- [ ] Verify `npm run check` passes
+- [x] Add migration `006_oauth_token_attempts` to `src/state.ts` (table with `ip_address`, `endpoint`, `created_at` columns; index on `ip_address, endpoint, created_at`)
+- [x] Add IP-based rate limiting to `POST /oauth/token` (≤`tokenRateLimitPerMinute` req/min/IP, default 20) — reuses sliding-window pattern from registration rate limiting
+- [x] Add IP-based rate limiting to `POST /oauth/revoke` (≤`revokeRateLimitPerMinute` req/min/IP, default 60)
+- [x] Validate `state` parameter in OAuth authorization requests: max 512 chars, URL-safe characters only (`/^[\w\-._~%+/=]*$/`)
+- [x] Tests added: token rate limit 429, revoke rate limit 429, state too long 400, state invalid chars 400 — all using isolated configs to avoid interfering with other tests
+- [x] `npm run check` passes (287/287 tests)
 
 ---
 
@@ -77,5 +78,5 @@ Two CSRF token comparisons use direct string equality (`===`/`!==`) rather than 
 | 1 — Dependency upgrades                    | complete | —      |
 | 2 — SSRF hardening                         | complete | —      |
 | 3 — Timing-safe CSRF                       | complete | —      |
-| 4 — OAuth rate limiting & state validation | pending  | —      |
+| 4 — OAuth rate limiting & state validation | complete | —      |
 | 5 — Admin hardening                        | pending  | —      |

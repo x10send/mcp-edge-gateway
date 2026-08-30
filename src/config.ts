@@ -94,6 +94,8 @@ export interface OAuthConfig {
   dynamicRegistrationLimitPerHour: number;
   loginLimitPerHour: number;
   loginLockoutSeconds: number;
+  tokenRateLimitPerMinute: number;
+  revokeRateLimitPerMinute: number;
   staticClients: OAuthStaticClientConfig[];
 }
 
@@ -203,6 +205,16 @@ function parseOAuth(value: unknown): OAuthConfig {
       oauth.loginLockoutSeconds,
       "oauth.loginLockoutSeconds",
       900,
+    ),
+    tokenRateLimitPerMinute: readPositiveInteger(
+      oauth.tokenRateLimitPerMinute,
+      "oauth.tokenRateLimitPerMinute",
+      20,
+    ),
+    revokeRateLimitPerMinute: readPositiveInteger(
+      oauth.revokeRateLimitPerMinute,
+      "oauth.revokeRateLimitPerMinute",
+      60,
     ),
     staticClients: parseStaticClients(oauth.staticClients),
   };
