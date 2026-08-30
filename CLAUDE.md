@@ -114,6 +114,8 @@ The admin app runs as a completely separate Fastify instance on `admin.host:admi
 
 **Session/CSRF:** Login issues a session cookie (`mcp_admin_session`, httpOnly, secure by default, sameSite=strict, path=/admin). Each session carries a CSRF token stored in the DB. State-changing routes require both a valid session AND the matching CSRF token in the request body. Session rotation happens on config save.
 
+**Session IP binding:** Admin sessions are not bound to the client IP by design. The admin UI is intended for a single operator on a trusted LAN; adding IP binding would break legitimate use cases such as DHCP address changes or VPN reconnects without a meaningful security gain in that threat model.
+
 **Admin config settings (in `gateway.yaml`):** `admin.port` (must differ from 8788), `admin.host` (default 127.0.0.1), `admin.insecureAllowHttpCookies` (default false; LAN-only direct HTTP override), `admin.sessionTtlSeconds` (default 28800), `admin.maxLoginAttemptsPerHour` (default 10), `admin.loginLockoutSeconds` (default 900). Admin config changes require a gateway restart to take effect.
 
 ## OAuth Resource Server

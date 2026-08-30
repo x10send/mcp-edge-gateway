@@ -64,10 +64,11 @@ Two CSRF token comparisons use direct string equality (`===`/`!==`) rather than 
 
 **Addresses:** M-2, M-6, L-2 (L-1 accepted as-is)
 
-- [ ] Propagate `security.trustedProxies` (or a separate `admin.trustedProxies` config field) to the admin Fastify instance so IP-based login rate limiting works correctly behind proxies
-- [ ] Harden `htmlError()` in `src/admin-app.ts`: rename parameter to `safeHtml` and add JSDoc warning that callers must pre-escape all interpolated values, or add an `escapeHtml` call on the message and split caller call sites into raw-html and string variants
-- [ ] (Optional / low priority) Document that session IP binding is not implemented and is by design; add a note in CLAUDE.md
-- [ ] Verify `npm run check` passes
+- [x] Propagate `security.trustedProxies` to the admin Fastify instance (`trustProxy` option) so IP-based login rate limiting uses the real client IP behind a reverse proxy — matches the pattern already used in the public listener
+- [x] Test added: login from forwarded IP X is rate-limited independently from forwarded IP Y when trustedProxies is configured
+- [x] Harden `htmlError()` in `src/admin-app.ts`: renamed parameter from `message` to `safeHtml`; added JSDoc warning that callers must pre-escape any interpolated values via `escapeHtml()` before passing
+- [x] Documented session IP binding non-implementation in CLAUDE.md (L-2): by design for single-operator LAN use, not a security gap in the threat model
+- [x] `npm run check` passes (288/288 tests)
 
 ---
 
@@ -79,4 +80,4 @@ Two CSRF token comparisons use direct string equality (`===`/`!==`) rather than 
 | 2 — SSRF hardening                         | complete | —      |
 | 3 — Timing-safe CSRF                       | complete | —      |
 | 4 — OAuth rate limiting & state validation | complete | —      |
-| 5 — Admin hardening                        | pending  | —      |
+| 5 — Admin hardening                        | complete | —      |

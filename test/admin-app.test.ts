@@ -35,6 +35,8 @@ const BASE_CONFIG: GatewayConfig = {
     dynamicRegistrationLimitPerHour: 20,
     loginLimitPerHour: 10,
     loginLockoutSeconds: 900,
+    tokenRateLimitPerMinute: 100,
+    revokeRateLimitPerMinute: 100,
     staticClients: [],
   },
   admin: {
@@ -333,6 +335,41 @@ test("POST /admin/login rate-limits after too many failures", async () => {
       headers: { "content-type": "application/x-www-form-urlencoded" },
     });
     assert.equal(res.statusCode, 429);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+test("POST /admin/login rate-limits by forwarded IP when trusted proxies are configured", async () => {
+  const ctx = setupTest({
+    ...BASE_CONFIG,
+    admin: { ...BASE_CONFIG.admin, maxLoginAttemptsPerHour: 2 },
+    security: { ...BASE_CONFIG.security, trustedProxies: ["127.0.0.1"] },
+  });
+  try {
+    await doSetup(ctx);
+    const loginAs = (xForwardedFor: string) =>
+      ctx.app.inject({
+        method: "POST",
+        url: "/admin/login",
+        payload: "password=wrong",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "x-forwarded-for": xForwardedFor,
+        },
+      });
+    assert.equal((await loginAs("1.2.3.4")).statusCode, 401);
+    assert.equal((await loginAs("1.2.3.4")).statusCode, 401);
+    assert.equal(
+      (await loginAs("1.2.3.4")).statusCode,
+      429,
+      "1.2.3.4 should be rate limited",
+    );
+    assert.equal(
+      (await loginAs("5.6.7.8")).statusCode,
+      401,
+      "5.6.7.8 should not be rate limited",
+    );
   } finally {
     await ctx.cleanup();
   }

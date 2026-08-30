@@ -372,7 +372,12 @@ ${body}
 </html>`;
 }
 
-function htmlError(title: string, message: string, backHref?: string): string {
+/**
+ * Renders an HTML error page.
+ * `safeHtml` is inserted verbatim — callers MUST escape any interpolated
+ * values with escapeHtml() before passing them in.
+ */
+function htmlError(title: string, safeHtml: string, backHref?: string): string {
   const back = backHref
     ? `<p style="margin-top:1rem"><a href="${escapeHtml(backHref)}" class="btn btn-secondary btn-sm">← Back</a></p>`
     : "";
@@ -389,7 +394,7 @@ function htmlError(title: string, message: string, backHref?: string): string {
 <div class="auth-card">
 <div class="auth-logo">MCP Gateway</div>
 <h2 class="auth-title">${escapeHtml(title)}</h2>
-<div class="alert alert-error">${message}</div>
+<div class="alert alert-error">${safeHtml}</div>
 ${back}
 </div>
 </div>
@@ -426,6 +431,10 @@ export function buildAdminApp(options: BuildAdminAppOptions) {
         censor: "[REDACTED]",
       },
     },
+    trustProxy:
+      config.security.trustedProxies.length > 0
+        ? config.security.trustedProxies
+        : false,
   });
 
   void app.register(fastifyCookie);
