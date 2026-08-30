@@ -10,6 +10,7 @@ RUN npm run build
 FROM node:26-alpine AS runtime
 
 ENV NODE_ENV=production
+RUN apk upgrade --no-cache
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev \
